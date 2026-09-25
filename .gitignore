@@ -17,3 +17,9 @@ venv/
 # kept locally for reverse-engineering reference, never committed.
 /original_game/*
 !/original_game/README.md
+
+# Ghidra project databases (large, binary, machine-specific) — keep
+# written-up findings in re_analysis/*.md instead, not the raw project.
+/re_analysis/ghidra_project/
+*.rep/
+*.gpr
