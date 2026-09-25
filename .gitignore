@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Python (in case that's the eventual language choice)
+__pycache__/
+*.pyc
+.venv/
+venv/
