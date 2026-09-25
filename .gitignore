@@ -20,6 +20,8 @@ venv/
 
 # Ghidra project databases (large, binary, machine-specific) — keep
 # written-up findings in re_analysis/*.md instead, not the raw project.
-/re_analysis/ghidra_project/
+/re_analysis/begin4-ghidra/
 *.rep/
 *.gpr
+*.lock
+*.lock~
