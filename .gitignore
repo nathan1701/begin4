@@ -12,3 +12,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Original game files are copyrighted third-party binaries/docs —
+# kept locally for reverse-engineering reference, never committed.
+/original_game/*
+!/original_game/README.md
