@@ -741,20 +741,19 @@ for the RVA conversion instead of the header's field. See `PYTHON_TOOLS.md` for 
    one mechanism (§3.6) — closing the "same object or different?" question definitively: **all
    three read static, per-class constants through their own array container; none reach the live
    Reactor object, and none share a single common pointer.**
-7. **Mostly closed — `ship+0xf0`.** Confirmed via disassembly: it's a plain **integer** (`FILD`,
-   not `FLD`), set at construction to a raw copy of `class_data+0x18`, which the class-data mapping
-   session (§3.9) corrected from "DWT" to **crew** — so a fresh ship starts with
+7. **CLOSED — `COMBAT_DAMAGE` session.** Confirmed via disassembly: it's a plain **integer**
+   (`FILD`, not `FLD`), set at construction to a raw copy of `class_data+0x18`, which the class-data
+   mapping session (§3.9) corrected from "DWT" to **crew** — so a fresh ship starts with
    `ship+0xf0 == crew`, giving `FUN_004035b0`'s ratio an initial value of exactly `1.0` (this part
    of the original claim survives; the "power-to-weight" label doesn't — it's crew-based). Confirmed
-   zeroed under `ship+0xc48 == 10` ("reactor destroyed"). **No per-frame writer was found** —
-   checked both callers of `FUN_0040a9a0` (neither stores its result to `+0xf0`; one is a local pool
-   accumulator, the other turned out to be a UI/status-icon function, `FUN_00415ca0`) and the two
-   per-ship functions that run earlier in the same per-frame pass (`Ship::vftable+0x2c` →
-   `FUN_00403460`, and `FUN_00402b60`) — none touch `+0xf0`. Working theory: there may be no
-   per-frame writer at all; `+0xf0` most likely only *decreases* when a reactor unit takes combat
-   damage (or, now that it's known to be crew-based, possibly a casualty count), a genuinely
-   different code path. Confirming that is combat-damage work, not energy-system work — see the
-   note at the end of this doc.
+   zeroed under `ship+0xc48 == 10` ("reactor destroyed"). **There is no per-frame writer, and there
+   never was one to find**: `COMBAT_DAMAGE_MAP.md` §4 traced the real writer to
+   `FUN_00404d90` (`Ship::vftable+0x34`, the damage-application function) — `ship+0xf0` (crew) only
+   decreases on a hull-penetrating combat hit, via a random casualty roll proportional to that hit's
+   damage. This was exactly the "working theory" below, now confirmed with the actual formula shape,
+   plus the added detail that it runs on *every* hull-penetrating hit (Begin 3 has no accumulating
+   hull-HP pool — see `COMBAT_DAMAGE_MAP.md` §0/§4.1, a correction to what a much older, since-fixed
+   assumption about `ship+0x110` would have implied).
 
 **Still open, low priority:**
 
@@ -769,12 +768,18 @@ for the RVA conversion instead of the header's field. See `PYTHON_TOOLS.md` for 
 9b. **Decode the 13 TypeRecords' internal fields** (§3.8) — offsets are now known, contents mostly
    aren't (only Bank's `+0x38`=`maxCharge` is pinned down, §3.3b). This is step 2 of the class-data
    mapping session, in progress.
-10. **Two new leads from the ship constructor (class-data mapping session).** `ship+0x110 =
-   *(int*)(class_data+0x380)` (right after the last TypeRecord at `+0x348`) — **partially
-   explained by §3.9**: `class_data+0x390`, ten bytes further along, is used by `FUN_004035b0` as a
-   scaling factor for a *linked* ship's malfunction-risk contribution, so `+0x380`/`+0x390` are
-   likely a small block of "linked ship" scaling constants, though `+0x380`'s own role specifically
-   wasn't confirmed. Separately, `FUN_00401de0(this, *(double*)(class_data+0x40),
+10. **CLOSED (`class_data+0x380`/`+0x390`) — `COMBAT_DAMAGE` session, live-verified.**
+    `class_data+0x380` is confirmed `0` for every ship class tested (Heavy Cruiser/Destroyer/
+    Frigate), both statically and via a live `/proc/<pid>/mem` read — it's copied into `ship+0x110`,
+    which turns out to be scratch space inside the damage-application function, not a meaningful
+    stat; see `COMBAT_DAMAGE_MAP.md` §0/§4.1 for the full story (this reverses a "max hull" guess
+    that `COMBAT_DAMAGE`'s own working notes briefly held mid-session, before the live read).
+    `class_data+0x390` is confirmed `1.0` live for Heavy Cruiser, matching the already-suspected
+    "linked ship malfunction-risk scaling factor, default/identity value" role this item originally
+    proposed. A related field, `class_data+0x3a0`, turned out to be the actually-important one
+    nearby: a per-class instant-destruction damage threshold (`75.0`/`60.0`/`50.0` EU for HC/
+    Destroyer/Frigate, live-verified for HC) — see `COMBAT_DAMAGE_MAP.md` §4.1/§7.
+    Separately, still open: `FUN_00401de0(this, *(double*)(class_data+0x40),
    *(double*)(class_data+0x28), *(double*)(class_data+0x30))` — three doubles read from
    class_data's header region and passed to an uninspected function — remains open; note the
    corrected offsets (§3.9) put crew at `+0x18` and DWT at `+0x1C`, so these three doubles
@@ -874,6 +879,27 @@ for the RVA conversion instead of the header's field. See `PYTHON_TOOLS.md` for 
   live/dynamic check (here, `/proc/<pid>/mem` on the running game) over more static guessing when
   two independently-plausible static readings contradict each other, since static analysis alone
   can't tell you *which* plausible reading is real.
+- **A decompiled call with suspiciously few or opaque arguments (`extraout_*` registers, a function
+  seemingly "called with nothing") is a sign the real argument arrives on the x87 FPU stack, not as
+  a normal parameter — and Ghidra's pseudocode can badly misattribute it.** (`COMBAT_DAMAGE` session,
+  see `COMBAT_DAMAGE_MAP.md` §5 for the full writeup.) This happened three times in one session, all
+  around small CRT/math-internal helpers (`FUN_0044c1c0`'s round-to-int64, `FUN_0044c380`'s NaN/Inf
+  domain guard). The most costly instance: Ghidra's decompiled pseudocode for the phaser damage
+  formula confidently attributed its final multiplier to `_DAT_00464ad8` (**4.0**, reused from
+  Drive/Shield) — the raw disassembly showed the actual instruction was `FMUL [0x00464bd0]`
+  (**0.5**); `4.0` doesn't appear anywhere in that function's real instructions. **When a call looks
+  like this, disassemble the function and read the `FLD`/`FST`/`FSTP` sequence directly — don't
+  trust the pseudocode's variable names or constant references.** Same underlying discipline as the
+  off-by-4 lesson above (trust code over a derived label), just applied to decompiler output instead
+  of a heuristic file-offset table.
+- **A field's value being flatly `0` isn't automatically a bug — it can also overturn a hypothesis
+  you already halfway believed.** (`COMBAT_DAMAGE` session, see `COMBAT_DAMAGE_MAP.md` §0/§4.1.)
+  `class_data+0x380` reading `0` for every ship class looked exactly like last session's off-by-4
+  symptom (a code-confirmed offset giving an "impossible" value) and briefly got framed as "probably
+  a stale template value, needs a live check to find the real number." The live check confirmed the
+  *file* was right all along — `0` is the real, permanent value, and the mid-session "max hull"
+  hypothesis for that field was simply wrong. A live read settles *whether* a surprising value is
+  real; it doesn't presuppose the surprising value must be a bug.
 
 ---
 
@@ -908,3 +934,11 @@ mislabeled several fields since Path B4/B7 (§3.9, with corrections to §3.6/§3
 Step 3 (the remaining class-data header fields — the three-doubles call, `class_data+0x00`'s
 unidentified field, `class_data+0xC`'s non-name-pool table) is still open, lower priority than
 combat-damage work now that crew/DWT/the 13 TypeRecords are solid.
+
+**Update (`COMBAT_DAMAGE` session):** the phaser/Bank weapon-fire → hit → shield-absorption →
+hull/destruction chain is now fully traced and code-confirmed — see the new `COMBAT_DAMAGE_MAP.md`
+for the complete writeup. This closed out §7 items 7 and 10 above for good (both cross-referenced
+into that doc), found that Begin 3 has no accumulating hull-HP pool (a genuine surprise, corrected
+mid-session via a live memory read — see `COMBAT_DAMAGE_MAP.md` §0), and left a full open-questions
+list of its own (`COMBAT_DAMAGE_MAP.md` §6), headlined by the Tube/torpedo equivalent of this whole
+chain being completely untraced.

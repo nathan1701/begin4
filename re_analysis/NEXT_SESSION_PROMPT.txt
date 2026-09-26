@@ -3,50 +3,74 @@ BEGIN 4 REVERSE ENGINEERING - NEXT SESSION PROMPT
 ==================================================================================
 
 PROJECT: Begin 4 - Reverse engineer Begin 3 energy system, implement in Begin 4
-STATUS: The energy-system investigation (Paths B1-B7) and the CLASS_DATA_MAPPING session are
-        DONE. The user chose combat/damage formulas as the goal, with class-data structure as a
-        prerequisite - that prerequisite is now substantially complete. Ready to start the
-        COMBAT_DAMAGE session.
-NAMING CONVENTION (decided 2026-09-26, see PYTHON_TOOLS.md): the `B1`-`B7` letter/number scheme is
-retired. Name this next session `COMBAT_DAMAGE` (a short descriptive slug), not "Path B8" or "Path
-C" - see PYTHON_TOOLS.md's "Related Sessions & Paths" table for the reasoning and the pattern to
-follow (add a date prefix too if the session's focus might shift partway through).
-LAST ACHIEVEMENT: CLASS_DATA_MAPPING session (2026-09-26) - traced all 13 subsystem
-                  `ConstructArray` functions to find the complete class_data TypeRecord table
-                  (Reactor/Battery/Bank/Tube/Launcher/Drive/Shield/Transporter/Scanner/Cloak/
-                  Impulse/Tractor/LifeSupport, offsets +0x58 through +0x348); found and fixed a
-                  session-crossing off-by-4 bug in the project's static ship-class file offsets
-                  (confirmed via a live /proc/<pid>/mem read of the actual running game); this
-                  reversed two of Path B7's headline findings (ship+0xe8 is a shuffled SHIP NAME,
-                  not a commanding-officer surname; the "likely genuine bug" in FUN_00418080 was
-                  never a bug - it reads a legitimate surname-pool pointer at ship+0xec+0x8) and
-                  corrected ship+0xf0/FUN_004035b0's ratio from "power-to-weight" to crew-based.
-                  Also decoded Bank's charge mechanics fully (universal across ship classes) and
-                  confirmed Drive's/Shield's per-class capacity fields exactly match the manual's
-                  EU numbers. Full writeup in ENERGY_SYSTEM_MAP.md sections 3.8, 3.9, and 7.
+STATUS: The energy-system investigation, the CLASS_DATA_MAPPING session, and the COMBAT_DAMAGE
+        session (phaser/Bank weapon fire, hit resolution, shield absorption, hull/destruction) are
+        all DONE. The single biggest remaining thread in the combat-damage goal is the torpedo/Tube
+        weapon path, which is completely untraced - everything COMBAT_DAMAGE found was specifically
+        about phasers/Bank. Ready to start a session on that (suggested name: `TORPEDO_DAMAGE` or
+        similar - see PYTHON_TOOLS.md's "Related Sessions & Paths" table for the naming convention).
+LAST ACHIEVEMENT: COMBAT_DAMAGE session (2026-09-26) - traced the entire phaser/Bank weapon-fire
+                  chain from the per-frame "should we fire" check down through per-target hit
+                  resolution, decoded the damage formula (linear range falloff, confirmed via raw
+                  disassembly after Ghidra's decompiler pseudocode gave a wrong answer - see below),
+                  fully decoded shield absorption (6 directional facings, per-class capacity/
+                  efficiency pulled from the class_data TypeRecord table, a shield-bypassing
+                  "weapon type 1"), found Ship::vftable+0x34 = the real damage-application function,
+                  and - via a live memory read - overturned a mid-session hypothesis that Begin 3
+                  has an accumulating hull-HP pool. It doesn't: every hull-penetrating hit is
+                  independently checked against a flat per-class destruction threshold. This closed
+                  ENERGY_SYSTEM_MAP.md's two longest-open questions (§7 items 7 and 10) for good.
+                  Full writeup in the new re_analysis/COMBAT_DAMAGE_MAP.md.
 
 ==================================================================================
 READ THIS FIRST
 ==================================================================================
 
-1. re_analysis/ENERGY_SYSTEM_MAP.md - the authority on the energy system AND class_data structure.
-   Read the correction banners near the top before trusting anything about ship+0xe8, ship+0xec,
-   ship+0xf0, crew, or DWT offsets from before 2026-09-26. Section 3.8 has the full 13-subsystem
-   TypeRecord table; section 3.9 has the off-by-4 bug story and the corrected offsets; section 7
-   has the current open-questions list (items 9b/10 are the most relevant leftovers).
-2. re_analysis/ship-struct-analysis.md - also corrected this session (file offsets, header field
-   table). Still has open TODOs: class_data+0x00 and +0xC are unidentified; everything past DWT in
-   the "MAIN STATS SECTION" table is an unverified hypothesis, not a finding.
-3. re_analysis/PYTHON_TOOLS.md - tool manifest. New this session: `binary_tools.dump_doubles()` /
-   `print_doubles()` (TypeRecord fields are 8-byte doubles, not 4-byte floats/ints), and
-   `read_live_classdata.py` (a one-off diagnostic for reading a running Begin.exe's class_data via
-   /proc/<pid>/mem with sudo - kept for reference, not part of the general toolkit).
-4. docs/handoff-PATH-B2-energy-analysis.md - goal #3 (combat damage formulas) is now the active
-   target; goal #4 (personality/AI struct) is still open for later.
+1. re_analysis/COMBAT_DAMAGE_MAP.md - the authority on weapon firing, damage formulas, shield
+   absorption, and hull/destruction mechanics. Read §0 first (a correction made mid-session, still
+   worth knowing about) and §6 for the full open-questions list - item 10 (torpedo/Tube path) is
+   the natural next session's target, but items 1-9 are all smaller, independently pickable
+   loose ends from the phaser/Bank work if the torpedo path stalls or isn't wanted next.
+2. re_analysis/ENERGY_SYSTEM_MAP.md - still the authority on the energy system AND class_data
+   structure. §7 items 7 and 10 are now marked CLOSED with pointers into COMBAT_DAMAGE_MAP.md - if
+   you're cross-referencing older claims about `ship+0xf0`, `ship+0x110`, or `class_data+0x380`/
+   `+0x390`/`+0x3a0`, trust COMBAT_DAMAGE_MAP.md's versions, not anything older. §8 also picked up
+   two new methodology lessons from this session worth reading before doing more Ghidra work (the
+   "FPU-hidden-argument decompiler trap" one is a real time-saver - it bit this session three times).
+3. re_analysis/ship-struct-analysis.md - its TODO list item 9 now covers the resolved
+   `class_data+0x380/+0x390/+0x3a0` fields; item 5 in "NEXT STEPS IN RE" is marked done for
+   phasers specifically, with the torpedo path flagged as the part that's still open.
+4. re_analysis/PYTHON_TOOLS.md - tool manifest. `read_live_classdata.py` was extended (not
+   rewritten) this session to also read `class_data+0x380/+0x390/+0x3a0` and a live ship's
+   `+0x110` - reuse that rather than writing a new one-off script if another live check is needed.
+5. docs/handoff-PATH-B2-energy-analysis.md - goal #3 (combat damage formulas) is now substantially
+   done for phasers; goal #4 (personality/AI struct) is still open for later.
 
 Do NOT trust re_analysis/PATH_B3_FINDINGS.md, B3_PROGRESS.txt, or PATH-B-FINDINGS.md's claims about
 ship+0xb88/+0xbb8/+0xc20/+0xe8/+0xec/+0xf0, class_data+0x14/+0x18, or any ship-class file offset -
-ENERGY_SYSTEM_MAP.md and ship-struct-analysis.md are the corrected authorities as of 2026-09-26.
+ENERGY_SYSTEM_MAP.md, ship-struct-analysis.md, and now COMBAT_DAMAGE_MAP.md are the corrected
+authorities as of 2026-09-26.
+
+==================================================================================
+LIVE GAME ACCESS (good news for the torpedo session specifically)
+==================================================================================
+
+The developer is keeping the **same running instance** of Begin.exe under Wine up for the next few
+sessions, so the PID found at the end of COMBAT_DAMAGE is expected to still be valid - **PID 117796**
+(`Z:\home\nathan\Downloads\Begin301b151\Begin.exe`) - worth confirming with a quick
+`ps aux | grep -i begin.exe` at the start of the session rather than assuming it's unchanged forever
+(it won't survive a game restart or reboot), but this saves re-deriving it every time.
+
+More importantly for torpedo work specifically: **the developer can interactively load, aim, and
+fire a torpedo in the live game** on request. This is a real analysis tool, not just a value-check -
+it means a live memory read (via `read_live_classdata.py` or a quick extension of it, same
+`/proc/<pid>/mem` + sudo technique) can be timed around an actual player action, e.g. "read
+`ship+0x454`'s Tube array right before and right after you fire one torpedo" to directly observe
+whatever field represents an in-flight torpedo, an armed/unarmed state, or a target lock - exactly
+the kind of dynamic behavior that's hard to infer from static disassembly alone when a whole new
+weapon path (with likely projectile/travel-time semantics, per COMBAT_DAMAGE_MAP.md §6 item 10) is
+being traced from scratch. Use this early and often for the torpedo path rather than treating it as
+a last resort the way the class-data live check was used last session.
 
 ==================================================================================
 GHIDRA CONNECTION
@@ -56,47 +80,67 @@ A live Ghidra MCP connection (tools named mcp__ghidra__*) was used throughout. C
 the start of the session (e.g. `get_current_function` - a "no function at this address" reply means
 it's connected and working, not broken).
 
-This session's biggest lesson: **a heuristic file-offset table built by searching for known numbers
-can be systematically wrong by a constant amount and still "confirm" several fields by coincidence**
-(see ENERGY_SYSTEM_MAP.md §3.9 and §8's new bullet). When a code-confirmed offset (from disassembly,
-applied to the actual runtime pointer) disagrees with a heuristic/file-offset-based one, trust the
-code-confirmed one, and if static analysis can't settle which is real, a live memory read can - see
-§3.9 for exactly how this session did that with the developer's own running copy of the game under
-Wine (no Cheat Engine needed - plain Python + /proc/<pid>/mem + sudo, since the default
-ptrace_scope=1 blocks same-user memory reads without it).
+**This session's biggest lesson, and a real time-sink if you don't know to watch for it:** when a
+decompiled function call has suspiciously few or opaque arguments (an `extraout_ECX`-style register,
+or a function that looks like it's "called with nothing"), the real argument is very likely arriving
+on the x87 FPU stack rather than as a normal parameter - Ghidra's high-level pseudocode can silently
+misattribute it to the wrong caller-side expression, including inventing a plausible-looking but
+WRONG constant reference. This happened three times this session, most expensively when the
+decompiled phaser-damage formula confidently claimed a `4.0` literal that turned out not to exist
+anywhere in the function's real instructions (raw disassembly showed `0.5`). When you see this
+pattern, use `disassemble_function`, not `decompile_function`, and read the `FLD`/`FST`/`FSTP`
+sequence directly. Full writeup: COMBAT_DAMAGE_MAP.md §5.
+
+The other standing lesson (from the class-data mapping session, still relevant): a heuristic
+file-offset table can be systematically wrong by a constant amount and still "confirm" several
+fields by coincidence. When a code-confirmed offset disagrees with a heuristic/file-offset-based
+one, trust the code-confirmed one, and if static analysis can't settle which is real, a live memory
+read can - see ENERGY_SYSTEM_MAP.md §3.9 and this session's own live check (COMBAT_DAMAGE_MAP.md
+§0) for two examples of exactly how and when to reach for that tool.
 
 ==================================================================================
-NEXT SESSION: COMBAT_DAMAGE
+NEXT SESSION: TORPEDO / TUBE WEAPON PATH (suggested name, pick your own if focus shifts)
 ==================================================================================
 
-The user chose this path (originally called "Path C" in their own guess) over personality/AI,
-the transporter/naming bug, and UI work. What actually happens when a weapon hits a ship - damage
-falloff by distance, shield absorption, armor/hull thresholds - and (a natural tie-in) whatever
-code path damages a Reactor unit, which would finally explain ship+0xf0's missing per-frame writer
-(ENERGY_SYSTEM_MAP.md §7 item 7 - still open, now known to be crew-based, not weight-based).
-`ship-struct-analysis.md`'s own TODO list already flags this ("Reverse combat damage model - linear
-vs. squared distance falloff").
+Everything COMBAT_DAMAGE_MAP.md documents comes from the phaser/Bank weapon path specifically
+(`ship+0x438`, `FUN_00403330`→`FUN_00408fa0`→`FUN_00408cf0`). The torpedo/Tube path
+(`ship+0x454`) is completely untraced by comparison. Do not assume it mirrors Bank's mechanism -
+the manual's own flavor text (already-known strings like "The torpedo arms after %.0lf cycle%s
+then remains stable...", "travels at a velocity of...") strongly implies torpedoes are actual
+physical projectiles with travel time and an arming distance, unlike phasers' apparent
+instant-hit-scan-across-the-whole-ship-list approach. The existing note in PYTHON_TOOLS.md that
+"Tube's per-unit charge code is a near-exact structural twin of Bank's" was specifically about
+*power draw* (Path B6), not hit resolution - don't let that carry over as an assumption here.
 
-Useful running starts for this work:
-- The 13 confirmed class_data TypeRecord offsets (ENERGY_SYSTEM_MAP.md §3.8) almost certainly hold
-  the per-class damage/armor/hull stat fields combat code will read - decode more of their internal
-  fields as needed (only Bank's full record and Drive's/Shield's `+0x30`/`+0x38` are decoded so far;
-  Tube's is presumably a near-twin of Bank's, matching the existing note that its per-unit code
-  already mirrors Bank's).
-- `dump_doubles()`/`print_doubles()` in `binary_tools.py` are the right tool for reading TypeRecord
-  fields (doubles, not floats) - use the corrected file offsets from `ship-struct-analysis.md`.
-- If any newly-decoded field looks surprising or doesn't match the manual, don't trust it purely
-  from the (corrected, but not exhaustively re-verified) static file offsets - cross-check a couple
-  of ship classes against the manual the same way this session did for Bank/Drive/Shield, and
-  reach for a live memory read again if something still doesn't add up.
+Useful running starts:
+- `ship+0x454` is Tube's confirmed runtime array offset (ENERGY_SYSTEM_MAP.md §2.1/§3.8).
+- Look for the per-frame "should we fire torpedoes" check the same way COMBAT_DAMAGE_MAP.md §1
+  found Bank's (`FUN_00403330` was found via `get_xrefs_to` on the "%s firing %d phaser%s.\n"
+  string's handler function, `FUN_004183e0` - the torpedo equivalent almost certainly exists
+  near "%s firing %d torpedo%s!\n" (already known string, VA 0x004691c0, from this session's
+  `list_strings` pass - xrefs to it weren't checked yet).
+- If torpedoes really are projectile objects (not instant hit-scan), expect a *separate* object
+  type/allocator (look for something like `FUN_0043d97e`-style small-object allocation, already
+  seen a few times this session for various event objects) and a collision-detection pass
+  elsewhere in the per-frame loop, rather than one self-contained fire function like Bank's
+  `FUN_00408cf0`.
+- Weapon type `1` (COMBAT_DAMAGE_MAP.md §2.2) - the shield-bypassing type found in shield-absorption
+  code - is an open guess for "this might be torpedoes." Worth checking directly once the torpedo
+  fire function is found: does it pass weaponType=1 to `Ship::vftable+0x34` (`FUN_00404d90`)?
 
-STILL OPEN, LOWER PRIORITY (raise again if combat work naturally touches them):
+STILL OPEN, LOWER PRIORITY (raise again if torpedo work naturally touches them, or as standalone
+quick wins - see COMBAT_DAMAGE_MAP.md §6 for full descriptions of items 1-9):
+- `FUN_004086a0` (Bank fire-selection logic) - which banks are chosen to fire each frame, and why.
+- `ship+0x138` - a second casualty-style pool that loses a random amount on critical hits.
+- `ship+0xc70`'s linked list - damage propagates here on big hits; distinct from the known
+  `ship+0x148` tractor-link pointer. Escort/fleet/docked-ship list? Unconfirmed.
+- The vtable+8 status-query enum used in Bank's per-target skip condition.
+- Cross-reference the 13-subsystem malfunction roll inside `FUN_00404d90` against `FUN_0040b510`'s
+  existing malfunction/event system - same event queue, or two independent systems?
 - Personality/AI struct (bravery/aggression values) - never located.
 - Transporter/ship-naming bug - the user remembers crew transport scrambling ship names in the UI.
-  This session's correction makes the existing lead (ENERGY_SYSTEM_MAP.md, end of §9) *more*
-  promising, not less: ship+0xe8 is now confirmed to be a shuffled SHIP NAME pointer (not a
-  surname), which matches the remembered symptom exactly. Worth revisiting if combat work stalls or
-  the user wants a break from stat-formula work.
+  Still a promising, checkable lead (ENERGY_SYSTEM_MAP.md §9) - worth revisiting if combat work
+  stalls or the user wants a break from stat-formula work.
 - class_data+0x00 (unidentified, zero for Heavy Cruiser) and class_data+0xC (a non-name-pool table
   of doubles + a text fragment) - low priority, not blocking combat.
 - Display/Summary struct construction site, and FUN_0040b510's verb-text table - cosmetic, low
@@ -111,5 +155,7 @@ REMEMBER THE PEDAGOGICAL GOALS (from CLAUDE.md)
 3. Check for understanding
 4. Reuse and improve existing Python scripts rather than rewriting them
 5. The user can run the actual game and report what they see/test, INCLUDING live memory reads
-   (confirmed working this session, via Wine + /proc/<pid>/mem + sudo) - use this actively, not
-   just for bug-hunting paths but whenever static analysis produces a result worth double-checking.
+   (used again this session, exactly as prescribed - a live `/proc/<pid>/mem` read settled whether
+   `class_data+0x380` reading `0` was a bug or the real value; it was the real value) - use this
+   actively, not just for bug-hunting paths but whenever static analysis produces a result worth
+   double-checking.

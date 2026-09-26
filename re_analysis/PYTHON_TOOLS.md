@@ -26,11 +26,14 @@
   out to be doubles.
 - `print_doubles(entries, header="")` - Pretty-print a `dump_doubles()` result.
 
-**Also in this directory:** `read_live_classdata.py` (new, class-data mapping session) - a
-one-off diagnostic (not part of the general toolkit, kept for reference) that reads a running
-Begin.exe's live `class_data` struct via `/proc/<pid>/mem`, needed to catch and confirm the off-by-4
-file-offset bug described below. Usage: `sudo python3 read_live_classdata.py <PID>` (needs root
-because of `ptrace_scope=1` — same-user access alone isn't enough to read another process's memory).
+**Also in this directory:** `read_live_classdata.py` (new in the class-data mapping session,
+**extended in `COMBAT_DAMAGE`**) - a one-off diagnostic (not part of the general toolkit, kept for
+reference) that reads a running Begin.exe's live `class_data` struct via `/proc/<pid>/mem`, needed
+to catch and confirm the off-by-4 file-offset bug described below. `COMBAT_DAMAGE` added reads for
+`class_data+0x380/+0x390/+0x3a0` and the live ship's own `+0x110`, used to confirm Begin 3 has no
+accumulating hull-HP pool (see `COMBAT_DAMAGE_MAP.md` §0). Usage:
+`sudo python3 read_live_classdata.py <PID>` (needs root because of `ptrace_scope=1` — same-user
+access alone isn't enough to read another process's memory).
 
 **Usage Example:**
 ```python
@@ -167,7 +170,7 @@ retroactively.
 | B6 | Name remaining subsystem slots, resolve 2nd 4.0 | none new | Named all 13 runtime subsystem slots via `FUN_004035b0`'s per-slot noun strings; corrected 2 mis-identified slots (`0xb88`/`0xc20`); resolved `0x00478798` as a row of an `atan()` lookup table |
 | B7 | Reactor-rate chase unification, `ship+0xe8`/`0xec`/`0xf0` | none new (used existing `va_to_file_offset`/`file_offset_to_va`) | Found `unit+0x30`(Drive)/`+0x34`(Shield) are array-container back-pointers, not ship back-pointers — same shape as Bank/Tube's `+0x20`; unified all three into one "unit → array → fixed class-data pointer → static double" mechanism; found `ship+0xe8` is a shuffled commanding-officer-name pointer, not "crew count"; found a likely genuine construction-time bug in `FUN_00418080`; confirmed `ship+0xf0` is an int (DWT-copy) with no per-frame writer found. Full writeup: `ENERGY_SYSTEM_MAP.md` §3.6/§3.7/§7. |
 | `CLASS_DATA_MAPPING` (2026-09-26) | Full class_data TypeRecord table + off-by-4 fix | `binary_tools.py` (added `dump_doubles`/`print_doubles`), `read_live_classdata.py` (new) | Traced all 13 subsystem `ConstructArray` functions to find the complete TypeRecord offset table in `class_data` (§3.8); found and fixed a session-crossing off-by-4 bug in `ship-struct-analysis.md`'s static file offsets via a live `/proc/<pid>/mem` read of the running game, which reversed two of Path B7's headline findings (`ship+0xe8` is a ship name not a surname; `ship+0xec`'s field is a legitimate surname pointer, not a bug) and corrected `ship+0xf0`/`FUN_004035b0`'s ratio from "power-to-weight" to crew-based (§3.9). Done as a prerequisite to combat-damage work. First session named under the new descriptive-naming convention (see note above the table). |
-| `COMBAT_DAMAGE` (planned, see `NEXT_SESSION_PROMPT.txt`) | Future | TBD | Combat damage formulas — weapon hit resolution, distance falloff, shield/armor thresholds; decode more of the 13 `class_data` TypeRecord fields; tie-in to `ship+0xf0`'s still-unexplained per-frame writer |
+| `COMBAT_DAMAGE` (2026-09-26) | Phaser/Bank weapon-fire → hit → shield-absorb → hull/destruction chain, fully traced | `read_live_classdata.py` (extended, not rewritten — added reads for `class_data+0x380/+0x390/+0x3a0` and live `ship+0x110`) | Traced the entire phaser fire chain (`FUN_00403330`→`FUN_00408fa0`→`FUN_00408cf0`) including the damage formula (linear range falloff, no `4.0` despite decompiler pseudocode claiming otherwise — see `COMBAT_DAMAGE_MAP.md` §5), fully decoded shield absorption (directional facings, per-class capacity/efficiency from the TypeRecord table, a shield-bypassing "weapon type 1"), found and confirmed `Ship::vftable+0x34` = `FUN_00404d90` (damage application), and — via a live memory read — **overturned Begin 3 having any accumulating hull-HP pool**: every hull-penetrating hit is independently checked against a flat per-class destruction threshold. This closed `ENERGY_SYSTEM_MAP.md` §7 items 7 and 10 for good. Full writeup: `COMBAT_DAMAGE_MAP.md`. Torpedo/Tube path left for a future session. |
 
 ---
 

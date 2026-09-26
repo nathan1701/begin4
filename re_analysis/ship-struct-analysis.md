@@ -193,6 +193,16 @@ Alignment appears to be 4-byte boundaries (word-aligned on x86).
    table of doubles and a text fragment ("We have examined your simulation results.") that doesn't
    match the 17-byte-record-stride name-pool pattern used by `+0x10`/`+0x14`. Neither was resolved
    this session.
+9. **RESOLVED — `class_data+0x380`/`+0x390`/`+0x3a0` (`COMBAT_DAMAGE` session, live-verified via
+   `/proc/<pid>/mem`, see `COMBAT_DAMAGE_MAP.md` §4.1/§7 and `ENERGY_SYSTEM_MAP.md` §7 item 10).**
+   `+0x380` is genuinely `0` for every class tested (HC/Destroyer/Frigate) — it's copied into
+   `ship+0x110` at construction, which turns out to be scratch space in the damage-application
+   function, not a stored "max hull" stat; Begin 3 has no accumulating hull-HP pool at all. `+0x390`
+   is `1.0` (live-confirmed, HC) — a linked-ship malfunction-risk scaling factor. `+0x3a0` is the
+   field that actually matters here: a per-class **instant-destruction damage threshold** —
+   `75.0`/`60.0`/`50.0` EU for HC/Destroyer/Frigate (live-confirmed for HC). Worth adding a row for
+   `+0x3a0` to a future revision of the "MAIN STATS SECTION" table above once more of the struct's
+   tail region gets mapped — not done here since this doc's table stops well before `+0x380`.
 
 ---
 
@@ -202,7 +212,12 @@ Alignment appears to be 4-byte boundaries (word-aligned on x86).
 2. **Cross-reference with code** — find Ghidra functions that read this table (search for hardcoded offsets like 0x40 or 0x44)
 3. **Locate personality/AI struct** — search for bravery, aggression values
 4. **Find game loop** — 10 subcycles per cycle, resource allocation, AI decision tree
-5. **Reverse combat damage model** — linear vs. squared distance falloff for different weapon types
+5. ~~**Reverse combat damage model** — linear vs. squared distance falloff for different weapon
+   types.~~ **Done for phasers/Bank — see `COMBAT_DAMAGE_MAP.md`.** Confirmed **linear** falloff
+   (`1 − distance/maxRange`, not squared) for the phaser/Bank weapon path specifically. **Still
+   open: the torpedo/Tube path** (`COMBAT_DAMAGE_MAP.md` §6 item 10) — torpedoes are physical
+   projectiles per the game's own flavor text (travel time, arming distance), so their falloff
+   mechanism may not match phasers' at all; don't assume it's the same formula.
 
 ---
 

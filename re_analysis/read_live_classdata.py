@@ -46,6 +46,22 @@ def main():
     print(f"class_data+0x54 (old guess: reactor count) = {val_54}")
     print(f"class_data+0x58 (code-confirmed Reactor TypeRecord count) = {val_58_word}")
 
+    # COMBAT_DAMAGE session: class_data+0x380 is code-confirmed (ship constructor,
+    # FUN_00404910) as the source ship+0x110 gets copied from at construction, and
+    # FUN_00404d90 (damage application) treats ship+0x110 as a live, decreasing hull-HP
+    # pool. But the static file reads 0 at class_data+0x380 for Heavy Cruiser/Destroyer/
+    # Frigate - suspicious, since a ship starting with 0 hull would hit the "critically
+    # low hull" branch on its very first point of hull damage, every time. Reading these
+    # live checks whether the static file's 0 is real or a stale/pre-init template value.
+    hull_max = struct.unpack('<i', read_mem(pid, class_data + 0x380, 4))[0]
+    link_scale = struct.unpack('<d', read_mem(pid, class_data + 0x390, 8))[0]
+    destruct_threshold = struct.unpack('<d', read_mem(pid, class_data + 0x3a0, 8))[0]
+    ship_hull_current = struct.unpack('<i', read_mem(pid, ship_ptr + 0x110, 4))[0]
+    print(f"class_data+0x380 (hypothesis: max hull, static file reads 0) = {hull_max}")
+    print(f"class_data+0x390 (hypothesis: linked-ship risk scaling) = {link_scale}")
+    print(f"class_data+0x3a0 (hypothesis: destruction threshold, static file reads 75.0 for HC) = {destruct_threshold}")
+    print(f"ship+0x110 (hypothesis: current hull HP, copied from class_data+0x380 at construction) = {ship_hull_current}")
+
 
 if __name__ == "__main__":
     main()
