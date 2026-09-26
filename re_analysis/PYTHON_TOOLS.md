@@ -148,7 +148,16 @@ git commit -m "Update PYTHON_TOOLS.md: Add new_tool.py entry"
 
 ## 🔗 Related Sessions & Paths
 
-| Path | Session | Scripts Created | Purpose |
+**Naming convention change (decided 2026-09-26):** the `B1`-`B7` letter/number scheme is retired
+going forward. It broke down once work stopped being one single linear investigation ("energy
+system") — this session didn't fit any of `NEXT_SESSION_PROMPT.txt`'s own lettered options (A-F),
+and needed an ad hoc label ("class-data mapping session") instead. From here on, sessions are
+named with a short descriptive slug (e.g. `COMBAT_DAMAGE`, `TRANSPORTER_BUG`), optionally with a
+date prefix if a session's focus might shift partway through and the topic label alone wouldn't
+capture it. Existing `B1`-`B7` labels in this table and elsewhere are left as-is — not renamed
+retroactively.
+
+| Path / Session | Session | Scripts Created | Purpose |
 |------|---------|-----------------|---------|
 | B1 | Initial exploration | — | Binary strings, function discovery |
 | B2 | Energy system | `energy_system_analysis.py` | Hypothesized a 4:1 WES:RES ratio constant (later corrected) |
@@ -157,8 +166,8 @@ git commit -m "Update PYTHON_TOOLS.md: Add new_tool.py entry"
 | B5 | Weapon power draw + `FUN_0040b510` | `energy_system_analysis.py` (added `file_offset_to_va`) | Traced Bank's real energy function (no 4.0, no ratio — closes the WES:RES question for good); identified `FUN_0040b510` as an unrelated malfunction/event system; hand-disassembled 2 functions Ghidra never analyzed |
 | B6 | Name remaining subsystem slots, resolve 2nd 4.0 | none new | Named all 13 runtime subsystem slots via `FUN_004035b0`'s per-slot noun strings; corrected 2 mis-identified slots (`0xb88`/`0xc20`); resolved `0x00478798` as a row of an `atan()` lookup table |
 | B7 | Reactor-rate chase unification, `ship+0xe8`/`0xec`/`0xf0` | none new (used existing `va_to_file_offset`/`file_offset_to_va`) | Found `unit+0x30`(Drive)/`+0x34`(Shield) are array-container back-pointers, not ship back-pointers — same shape as Bank/Tube's `+0x20`; unified all three into one "unit → array → fixed class-data pointer → static double" mechanism; found `ship+0xe8` is a shuffled commanding-officer-name pointer, not "crew count"; found a likely genuine construction-time bug in `FUN_00418080`; confirmed `ship+0xf0` is an int (DWT-copy) with no per-frame writer found. Full writeup: `ENERGY_SYSTEM_MAP.md` §3.6/§3.7/§7. |
-| Class-data mapping | Full class_data TypeRecord table + off-by-4 fix | `binary_tools.py` (added `dump_doubles`/`print_doubles`), `read_live_classdata.py` (new) | Traced all 13 subsystem `ConstructArray` functions to find the complete TypeRecord offset table in `class_data` (§3.8); found and fixed a session-crossing off-by-4 bug in `ship-struct-analysis.md`'s static file offsets via a live `/proc/<pid>/mem` read of the running game, which reversed two of Path B7's headline findings (`ship+0xe8` is a ship name not a surname; `ship+0xec`'s field is a legitimate surname pointer, not a bug) and corrected `ship+0xf0`/`FUN_004035b0`'s ratio from "power-to-weight" to crew-based (§3.9). Done as a prerequisite to combat-damage work. |
-| B8+ | Future — combat damage formulas (see `NEXT_SESSION_PROMPT.txt`) | TBD | Combat damage formulas; personality/AI struct; optionally Display struct construction and `FUN_0040b510` verb text (both low-priority cosmetic loose ends) |
+| `CLASS_DATA_MAPPING` (2026-09-26) | Full class_data TypeRecord table + off-by-4 fix | `binary_tools.py` (added `dump_doubles`/`print_doubles`), `read_live_classdata.py` (new) | Traced all 13 subsystem `ConstructArray` functions to find the complete TypeRecord offset table in `class_data` (§3.8); found and fixed a session-crossing off-by-4 bug in `ship-struct-analysis.md`'s static file offsets via a live `/proc/<pid>/mem` read of the running game, which reversed two of Path B7's headline findings (`ship+0xe8` is a ship name not a surname; `ship+0xec`'s field is a legitimate surname pointer, not a bug) and corrected `ship+0xf0`/`FUN_004035b0`'s ratio from "power-to-weight" to crew-based (§3.9). Done as a prerequisite to combat-damage work. First session named under the new descriptive-naming convention (see note above the table). |
+| `COMBAT_DAMAGE` (planned, see `NEXT_SESSION_PROMPT.txt`) | Future | TBD | Combat damage formulas — weapon hit resolution, distance falloff, shield/armor thresholds; decode more of the 13 `class_data` TypeRecord fields; tie-in to `ship+0xf0`'s still-unexplained per-frame writer |
 
 ---
 

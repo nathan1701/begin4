@@ -3,10 +3,15 @@ BEGIN 4 REVERSE ENGINEERING - NEXT SESSION PROMPT
 ==================================================================================
 
 PROJECT: Begin 4 - Reverse engineer Begin 3 energy system, implement in Begin 4
-STATUS: The energy-system investigation (Paths B1-B7) and the class-data mapping session are
+STATUS: The energy-system investigation (Paths B1-B7) and the CLASS_DATA_MAPPING session are
         DONE. The user chose combat/damage formulas as the goal, with class-data structure as a
-        prerequisite - that prerequisite is now substantially complete. Ready to start on combat.
-LAST ACHIEVEMENT: Class-data mapping session (2026-09-26) - traced all 13 subsystem
+        prerequisite - that prerequisite is now substantially complete. Ready to start the
+        COMBAT_DAMAGE session.
+NAMING CONVENTION (decided 2026-09-26, see PYTHON_TOOLS.md): the `B1`-`B7` letter/number scheme is
+retired. Name this next session `COMBAT_DAMAGE` (a short descriptive slug), not "Path B8" or "Path
+C" - see PYTHON_TOOLS.md's "Related Sessions & Paths" table for the reasoning and the pattern to
+follow (add a date prefix too if the session's focus might shift partway through).
+LAST ACHIEVEMENT: CLASS_DATA_MAPPING session (2026-09-26) - traced all 13 subsystem
                   `ConstructArray` functions to find the complete class_data TypeRecord table
                   (Reactor/Battery/Bank/Tube/Launcher/Drive/Shield/Transporter/Scanner/Cloak/
                   Impulse/Tractor/LifeSupport, offsets +0x58 through +0x348); found and fixed a
@@ -61,7 +66,7 @@ Wine (no Cheat Engine needed - plain Python + /proc/<pid>/mem + sudo, since the 
 ptrace_scope=1 blocks same-user memory reads without it).
 
 ==================================================================================
-NEXT STEP: COMBAT / DAMAGE FORMULAS
+NEXT SESSION: COMBAT_DAMAGE
 ==================================================================================
 
 The user chose this path (originally called "Path C" in their own guess) over personality/AI,
