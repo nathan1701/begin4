@@ -167,23 +167,71 @@ To read crew from runtime object:
 
 ---
 
+## Subsystem Initialization & Data Flow
+
+### How Subsystem Counts Are Read
+
+Each subsystem initializer reads the COUNT from class data at a specific offset, then creates an array of subsystem instances:
+
+**Reactor Initializer (FUN_0040a830, at ship runtime +0x150):**
+```c
+psVar3 = (short *)(*(int *)(ship + 0xe4) + 0x58);  // Read reactor count from class
+*(short *)this = *psVar3;  // Store count at subsystem +0x0
+// Then iterate and initialize each reactor
+```
+
+**Shield Initializer (FUN_0040af50, at ship runtime +0x7f8):**
+```c
+puVar4 = (undefined2 *)(*(int *)(ship + 0xe4) + 0x1d0);  // Read shield count
+*(undefined2 *)this = *puVar4;  // Store at subsystem +0x0
+```
+
+**Warp Drive Initializer (FUN_00409860, at ship runtime +0x708):**
+```c
+psVar4 = (short *)(*(int *)(ship + 0xe4) + 400);  // 0x190 in hex
+*(short *)this = sVar1;  // Store count
+```
+
+### Subsystem Array Pattern
+
+Each subsystem creates an array where offset +0x0 stores the COUNT, then individual instances follow:
+```
+Subsystem instance array:
++0x0: Count of this subsystem (e.g., 7 for reactors)
++0x x: Individual instance 1 data
++0x xx: Individual instance 2 data
+...
+```
+
+This explains why energy calculations iterate through these arrays - each subsystem instance calculates its own energy cost/generation.
+
+### Offset Mapping Notes
+
+⚠️ **Offset confusion:** Reference docs mention 0x54 for reactors, 0xc4 for phasers in class data, but initializers read from different offsets (0x58 for reactors, etc.). This suggests either:
+1. File format ≠ Runtime format (data is reformatted when loaded)
+2. Multiple data tables with different layouts
+3. Offset calculations applied during loading
+
+**Next investigation:** Trace class data loading to understand offset mapping.
+
 ## Next Steps
 
-### Tier 1 (Immediate)
-1. Decompile crew-reading functions called from energy update
-2. Decompile reactor-reading functions
-3. Decompile weapon-counting functions
-4. Find the 4:1 WES:RES ratio constant
+### Tier 1 (Immediate) ✅ IN PROGRESS
+- ✅ Found game loop structure (10 cycles × 10 subcycles)
+- ✅ Found ship initialization and subsystem creation
+- ✅ Found subsystem initializers reading from class data
+- ⏳ **Need:** Map exact class data offsets for crew, reactors, weapons
+- ⏳ **Need:** Find where class data is loaded/reformatted
 
-### Tier 2 (Understand)
-1. Trace FUN_00419bb0 upward to find game entry point
-2. Map all virtual method callers (0x2c, 0x30)
-3. Understand the linked list iteration structure
+### Tier 2 (Energy System)
+1. Decompile crew/reactor/weapon functions called from energy update (FUN_004035b0)
+2. Trace how these subsystem counts flow into energy allocation
+3. Find the 4:1 WES:RES ratio constant
 
-### Tier 3 (Refinement)
-1. Cross-reference ship data memory with struct analysis
-2. Find damage calculation code
-3. Locate personality/bravery struct
+### Tier 3 (Combat & AI)
+1. Find damage calculation code (linear for phasers, squared for torpedos)
+2. Locate personality/bravery struct
+3. Find retreat decision logic
 
 ---
 
