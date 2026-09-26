@@ -48,21 +48,64 @@ Processes energy systems on all ships:
 
 ---
 
-## Key Functions to Analyze
+## Ship Object Construction (CRITICAL DISCOVERY)
 
-### Energy Processing: FUN_004035b0
+### Ship Constructor: FUN_00404910
+**Location:** 0x00404910  
+**Allocates:** 0xc80 bytes (3200 bytes per ship object)  
+**Called from:** FUN_0040ccd0 (game initialization)
+
+**Runtime Ship Object Layout:**
+```
+Offset  Purpose
+------  -------
+0x00    Virtual function table (vftable)
+0xe0    Pointer to some status/tracking struct
+0xe4    ⭐ POINTER TO SHIP CLASS DATA ⭐
+0xe8    Crew count? (result from FUN_004011b0)
+0xec    Subsystem struct (initialized by FUN_00418080)
+0x110   Value from class data at offset 0x380
+0x150   Subsystem struct (initialized by FUN_0040a830)
+0x2a0   Subsystem struct (initialized by FUN_00409270)
+0x438   Subsystem struct (initialized by FUN_00408e60)
+0x454   Subsystem struct (initialized by FUN_0040cae0)
+0x470   Subsystem struct (initialized by FUN_00409e40)
+0x708   Subsystem struct (initialized by FUN_00409860)
+0x7f8   Subsystem struct (initialized by FUN_0040af50)
+0x9c0   Subsystem struct (initialized by FUN_0040bac0)
+0xb50   Subsystem struct (initialized by FUN_0040aaa0)
+0xb88   Subsystem struct (initialized by FUN_004094f0)
+0xc00   Subsystem struct (initialized by FUN_0040b6f0)
+0xbf0   Subsystem struct (initialized by FUN_00409b90)
+0xc20   Subsystem struct (initialized by FUN_0040a5e0)
+0xc58   Next ship pointer (linked list)
+0xc5c   Previous ship pointer (linked list)
+0xc60   Owner reference
+```
+
+**KEY INSIGHT:** 
+- Runtime object at 0xe4 stores a **pointer to class data**
+- Class data (at file offset 0x0008858c) contains:
+  - Crew: offset 0x14
+  - Reactors: offset 0x34 (**not 0x54**)
+  - Individual subsystems at various offsets
+- To read crew, code does: `*(int *)((ship_object_ptr + 0xe4)[0x14])`
+
+### Game Initialization: FUN_0040ccd0
+**Location:** 0x0040ccd0  
+Allocates 0xc80 bytes for each ship and calls FUN_00404910 to initialize.
+Iterates through ship lists from PTR_LOOP_00481000 and PTR_LOOP_0048100c.
+
+### Top-Level Entry: FUN_00419e40
+- **Location:** 0x00419e40  
+- **Callers:** Calls FUN_0040ccd0 (init), then FUN_00419bb0 (game loop)
+- Shows complete game startup sequence
+
+## Energy Processing: FUN_004035b0
 - **Accesses ship struct fields at many offsets**
-- Reads from offset 0xf0, 0xe4, 0x148, 0x390...
-- Calls:
-  - FUN_0040ab50, FUN_0040bdc0, FUN_004088c0, FUN_00409cb0
-  - FUN_00409600, FUN_0040a710, FUN_004090c0, FUN_0040ba00
-  - FUN_0040b740, FUN_00409530, FUN_0040a630
-- **NEXT:** Decompile these to find crew, reactor, weapon access patterns
-
-### Top-Level Caller: FUN_00419bb0
-- **Location:** 0x00419bb0  
-- Calls FUN_0040d330 at 0x00419dc6
-- **NEXT:** Find who calls this - likely main() or game entry point
+- Uses param_1 (runtime ship object) to get class data pointer at 0xe4
+- Then accesses fields from class data
+- Calls subsystem energy calculation functions
 
 ---
 
@@ -76,22 +119,51 @@ Processes energy systems on all ships:
 
 ---
 
-## Data Structures Identified
+## Data Structure Model: TWO-LAYER ARCHITECTURE
 
-### Ship Object Layout (from code)
-- Offset 0x2c: Virtual method pointer (AI decision)
-- Offset 0x30: Virtual method pointer (combat/weapons?)
-- Offset 0x34: Next ship pointer (linked list)
-- Offset 0xc: Some comparison field (used in FUN_0040f190)
-- Offset 0xc58: ?
-- Offset 0xd0: ?
-- Offset 0x316: ?
+The game uses **two separate data structures**:
 
-### Energy/Reactor Calculation (from FUN_004035b0)
-- Offset 0xf0: Primary energy value
-- Offset 0xe4: Pointer to ship class/template data
-- Offset 0x148: Target ship reference (?)
-- Offset 0x390: Some multiplier (energy efficiency?)
+### Layer 1: Class Definition (Static, in binary)
+**Location:** File offset 0x0008858c (Heavy Cruiser example)  
+**Properties:** Shared template data, loaded once at startup
+
+```
+Offset  Field
+------  -----
+0x00    Pointers to class name strings
+0x14    Crew count (INT) - e.g., 450 for HC
+0x18    Dead Weight Tonnage (INT)
+0x34    Number of reactors (INT) - e.g., 7 for HC
+0x40    Shield power per unit
+0x44    Phaser charge buildup
+0x618   Shields subsystem block
+0x650   Phasers subsystem block
+0x668   Torpedos subsystem block
+...     More subsystems
+```
+
+### Layer 2: Runtime Object (Instance-specific, heap-allocated)
+**Size:** 0xc80 bytes (3200 bytes)  
+**Created by:** FUN_00404910 (constructor)  
+**Properties:** One per ship in game, stores current game state
+
+```
+Offset  Field
+------  -----
+0x00    Virtual function table
+0xe4    ⭐ POINTER TO CLASS DATA (Layer 1)
+0xe8    Crew count (cached/current)
+0xec-0xc78  Subsystem instances (initialized from class)
+0xc58   Linked list pointers
+```
+
+**Code Access Pattern:**
+```
+To read crew from runtime object:
+  ship_runtime = ...  // runtime object at 0xe4
+  ship_class = *(int*)(ship_runtime + 0xe4)  // get class pointer
+  crew = *(int*)(ship_class + 0x14)  // read crew from class
+```
 
 ---
 
