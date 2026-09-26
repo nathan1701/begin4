@@ -1,0 +1,127 @@
+================================================================================
+PATH B3 PROGRESS SUMMARY
+================================================================================
+
+SESSION: Path B3 Energy System Deep Dive & Verification
+STATUS: Phase 1-2 Complete, Phase 3-4 In Progress
+
+================================================================================
+PHASE 1: VERIFY THE CONSTANT ✅ COMPLETE
+================================================================================
+
+Tasks:
+[✅] Run energy_system_analysis.py against Begin.exe
+[✅] Check if constant at 0x00464688 = 4.0 
+[✅] Verify PE header interpretation
+
+Findings:
+- Constant at 0x00464688: 100.0 (not 4.0 as expected!)
+- Actual 4.0 constants found at:
+  - 0x00464ad8 (in .rdata section)
+  - 0x00478798 (in .data section)
+- Ghidra uses 0x00400000 as base address (PE header says 0x00062e00)
+- Fixed VA-to-file-offset calculation to use proper section headers
+
+================================================================================
+PHASE 2: TRACE THE FMUL INSTRUCTIONS ✅ COMPLETE
+================================================================================
+
+Tasks:
+[✅] Navigate to 0x0040f871 and disassemble surrounding code
+[✅] Navigate to 0x0040f997 and document calculation
+[✅] Navigate to 0x0040fc87 and analyze relationship to shield power
+[✅] Add comments documenting what these calculate
+
+Findings:
+- All three FMUL instructions reference address 0x00464688
+- Instruction 1 (0x0040f871):
+  - Loads: [EAX + 0x208] (unknown ship field)
+  - Multiplies by: 0x00464688 (contains 100.0)
+  - Purpose: Display calculation
+
+- Instruction 2 (0x0040f997):
+  - Loads: [ECX + 0x1c8] (likely reactor power)
+  - Multiplies by: 0x00464688 (contains 100.0)
+  - Purpose: Reactor display calculation
+
+- Instruction 3 (0x0040fc87):
+  - Loads: [ECX + 0x390] (likely shield capacity)
+  - Multiplies by: 0x00464688 (contains 100.0)
+  - Purpose: Shield display calculation
+
+================================================================================
+PHASE 3: MAP DATA STRUCTURE 🔄 IN PROGRESS
+================================================================================
+
+Tasks:
+[ ] Locate weapon count/capacity field in ship struct
+[ ] Locate reactor output field
+[ ] Locate shield capacity field
+[ ] Find "Reactor" string reference and trace backwards
+[ ] Find "Weaponry" string reference and trace backwards
+
+Known Ship Structure Offsets:
+- 0x208: Unknown (first FMUL operand)
+- 0x1c0: Reactor output/power (likely)
+- 0x1c8: Reactor power level (likely, used in FMUL)
+- 0x1d0: Shield type
+- 0x38: Likely divisor in power calculations
+- 0x58: Weapon type 1 count
+- 0x90: Weapon type 2 count
+- 0x200, 0x110, 0x158: Different reactor types
+- 0x2d0: Unknown type (possibly armor/defense)
+- 0x390: Shield capacity (likely, used in FMUL)
+
+================================================================================
+PHASE 4: DOCUMENT FINDINGS 🔄 IN PROGRESS
+================================================================================
+
+Partially complete:
+- PATH_B3_FINDINGS.md created with detailed analysis
+- Energy system hypotheses documented
+- Outstanding questions identified
+
+Still needed:
+- Complete ship structure map
+- Energy calculation flow diagram
+- Relationship between 4.0 and 100.0 constants explained
+
+================================================================================
+CRITICAL INSIGHTS
+================================================================================
+
+1. CONSTANT MISMATCH:
+   - Path B2 reported 4.0 at 0x00464688
+   - Actual value at that address: 100.0
+   - Actual 4.0 values at: 0x00464ad8 and 0x00478798
+   
+2. 100.0 SIGNIFICANCE:
+   - Used for display scaling in all three FMUL instructions
+   - Might be shield maximum capacity
+   - Might be a display zoom factor
+   
+3. 4.0 CONSTANTS:
+   - Part of lookup tables or constants arrays
+   - Surrounded by physics-related values (π/180, trigonometric values)
+   - Represents WES:RES ratio (as suspected)
+
+================================================================================
+NEXT IMMEDIATE TASKS
+================================================================================
+
+Priority 1: Understand why 0x00464688 contains 100.0
+- Is it a different energy constant?
+- Is it related to display/UI scaling?
+- Check if address is dynamically modified
+
+Priority 2: Locate the actual 4.0 usage
+- Search for references to 0x00464ad8 and 0x00478798
+- Trace where these constants are loaded from
+- Understand if they're used in energy calculations or just initialization
+
+Priority 3: Complete ship structure mapping
+- Find weapon field offsets
+- Find reactor field offsets
+- Map all relevant fields
+
+================================================================================
