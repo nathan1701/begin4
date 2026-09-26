@@ -1,148 +1,101 @@
 ==================================================================================
-BEGIN 4 REVERSE ENGINEERING - PATH B6 NEXT SESSION PROMPT
+BEGIN 4 REVERSE ENGINEERING - NEXT SESSION PROMPT
 ==================================================================================
 
 PROJECT: Begin 4 - Reverse engineer Begin 3 energy system, implement in Begin 4
-CURRENT PHASE: Path B6 - Remaining energy-system loose ends + subsystem naming
-LAST ACHIEVEMENT: Path B5 - Traced weapon (Bank) power draw to its real per-unit energy
-                   function (no 4.0, no ratio - closes the "WES:RES 4:1" question for good).
-                   Identified FUN_0040b510 as an unrelated subsystem-malfunction/event system,
-                   not part of the energy pool. Hand-disassembled two functions Ghidra's
-                   auto-analysis had never reached. Updated ENERGY_SYSTEM_MAP.md, added
-                   file_offset_to_va() to energy_system_analysis.py.
+STATUS: The energy-system investigation (Paths B1-B7) and the class-data mapping session are
+        DONE. The user chose combat/damage formulas as the goal, with class-data structure as a
+        prerequisite - that prerequisite is now substantially complete. Ready to start on combat.
+LAST ACHIEVEMENT: Class-data mapping session (2026-09-26) - traced all 13 subsystem
+                  `ConstructArray` functions to find the complete class_data TypeRecord table
+                  (Reactor/Battery/Bank/Tube/Launcher/Drive/Shield/Transporter/Scanner/Cloak/
+                  Impulse/Tractor/LifeSupport, offsets +0x58 through +0x348); found and fixed a
+                  session-crossing off-by-4 bug in the project's static ship-class file offsets
+                  (confirmed via a live /proc/<pid>/mem read of the actual running game); this
+                  reversed two of Path B7's headline findings (ship+0xe8 is a shuffled SHIP NAME,
+                  not a commanding-officer surname; the "likely genuine bug" in FUN_00418080 was
+                  never a bug - it reads a legitimate surname-pool pointer at ship+0xec+0x8) and
+                  corrected ship+0xf0/FUN_004035b0's ratio from "power-to-weight" to crew-based.
+                  Also decoded Bank's charge mechanics fully (universal across ship classes) and
+                  confirmed Drive's/Shield's per-class capacity fields exactly match the manual's
+                  EU numbers. Full writeup in ENERGY_SYSTEM_MAP.md sections 3.8, 3.9, and 7.
 
 ==================================================================================
 READ THIS FIRST
 ==================================================================================
 
-Before anything else, read:
-1. re_analysis/ENERGY_SYSTEM_MAP.md - the complete, corrected picture. Sections 3.3b and 3.5
-   are new this session (weapon power draw, and the FUN_0040b510 resolution). Section 7
-   ("Open questions") has been re-split into "Closed in Path B5" and "Still open for Path B6" -
-   the still-open list (items 3-9) is exactly what this file expands into concrete tasks below.
-2. re_analysis/PYTHON_TOOLS.md - tool manifest. Read the new "Path B5 workflow" note under
-   energy_system_analysis.py before touching any string/constant that shows zero xrefs - it's
-   not always an indexed table; sometimes Ghidra just never analyzed that code as a function.
+1. re_analysis/ENERGY_SYSTEM_MAP.md - the authority on the energy system AND class_data structure.
+   Read the correction banners near the top before trusting anything about ship+0xe8, ship+0xec,
+   ship+0xf0, crew, or DWT offsets from before 2026-09-26. Section 3.8 has the full 13-subsystem
+   TypeRecord table; section 3.9 has the off-by-4 bug story and the corrected offsets; section 7
+   has the current open-questions list (items 9b/10 are the most relevant leftovers).
+2. re_analysis/ship-struct-analysis.md - also corrected this session (file offsets, header field
+   table). Still has open TODOs: class_data+0x00 and +0xC are unidentified; everything past DWT in
+   the "MAIN STATS SECTION" table is an unverified hypothesis, not a finding.
+3. re_analysis/PYTHON_TOOLS.md - tool manifest. New this session: `binary_tools.dump_doubles()` /
+   `print_doubles()` (TypeRecord fields are 8-byte doubles, not 4-byte floats/ints), and
+   `read_live_classdata.py` (a one-off diagnostic for reading a running Begin.exe's class_data via
+   /proc/<pid>/mem with sudo - kept for reference, not part of the general toolkit).
+4. docs/handoff-PATH-B2-energy-analysis.md - goal #3 (combat damage formulas) is now the active
+   target; goal #4 (personality/AI struct) is still open for later.
 
-Do NOT re-trust re_analysis/PATH_B3_FINDINGS.md or B3_PROGRESS.txt for factual claims about
-the energy system - both are marked superseded and kept only as historical record.
-
-==================================================================================
-CRITICAL CONTEXT - WHAT PATH B5 ESTABLISHED
-==================================================================================
-
-The "WES:RES 4:1" hypothesis is now fully closed, in both directions:
-1. DRIVE and SHIELD both use the real 4.0 literal (0x00464ad8) for two separate, real
-   game-balance rules (Path B4).
-2. WEAPONS (Bank, confirmed Path B5 via FUN_004087b0) use NEITHER 4.0 NOR any reactor-relative
-   ratio at all. Cost = flat reactor-rate deduction + a separate type-specific per-tick charge
-   cap (maxCharge/chargeRate, epsilon-clamped at 0x00465440=0.001). If the reactor can't cover
-   its own rate for a tick, Bank's accumulated charge resets to ZERO - a harsher failure mode
-   than Drive/Shield.
-3. FUN_0040b510 (flagged in Path B4 as charge-cycle-shaped, using both 4.0 and 0.5) turned out
-   to be a COMPLETELY SEPARATE system: a ship-wide "power-to-weight ratio" (reactor output /
-   class Dead Weight Tonnage, computed in FUN_004035b0) driving probabilistic malfunction/event
-   rolls for 5 subsystem slots (+0xb50, Tractor +0xb88, +0xbb8, +0xbf0, Cloak +0xc20). It
-   coincidentally reuses the same 4.0/0.5 literals as the real energy system but never touches
-   the reactor pool (local_88 from FUN_00404250). Don't confuse the two systems again.
-
-Two functions this session (FUN_00412bb0 "Bank::ChargeCommand" and FUN_00408b80
-"Bank::MarkUnitsState") were NOT in Ghidra's function database at all, despite being real code
-- one of them a direct CALL target. Both were hand-disassembled from raw bytes. If you hit
-"no function found at or containing address" from Ghidra on a region you have independent
-evidence contains real code (e.g. a raw-byte pointer search hit), don't assume it's unreachable
-- dump the bytes and decode by hand, or ask the user to create the function in the Ghidra GUI
-(right-click -> Disassemble, then Create Function) so future MCP calls can reach it normally.
+Do NOT trust re_analysis/PATH_B3_FINDINGS.md, B3_PROGRESS.txt, or PATH-B-FINDINGS.md's claims about
+ship+0xb88/+0xbb8/+0xc20/+0xe8/+0xec/+0xf0, class_data+0x14/+0x18, or any ship-class file offset -
+ENERGY_SYSTEM_MAP.md and ship-struct-analysis.md are the corrected authorities as of 2026-09-26.
 
 ==================================================================================
 GHIDRA CONNECTION
 ==================================================================================
 
-A live Ghidra MCP connection (tools named mcp__ghidra__*) was used throughout Path B5 -
-decompile/disassemble/xref queries plus RTTI/class-name exploration via list_strings and
-list_classes. Confirm it's connected at the start of the session. New tools used this session
-beyond the Path B4 set: list_classes (lists all C++ namespaces Ghidra has recovered, including
-per-subsystem RTTI class names), search_functions_by_name, list_methods, list_namespaces.
+A live Ghidra MCP connection (tools named mcp__ghidra__*) was used throughout. Confirm it's live at
+the start of the session (e.g. `get_current_function` - a "no function at this address" reply means
+it's connected and working, not broken).
 
-Also new this session: Path B4's Python-tool workflow for hand-verifying a "zero xrefs" string
-or constant - see PYTHON_TOOLS.md's "Path B5 workflow" note. Keep this in your back pocket for
-any future "why does this have no xrefs" moment.
-
-==================================================================================
-PATH B6 TASKS (PRIORITY ORDER)
-==================================================================================
-
-PRIORITY 1: Name the remaining subsystem slots via RTTI (45 min)
-[ ] Path B5 found full C++ RTTI type-descriptor strings for every subsystem class:
-    .?AVBank@@ (0x0048b438), .?AVBattery@@ (0x0048b44c), .?AVCloak@@ (0x0048b464),
-    .?AVDrive@@ (0x0048b478), .?AVImpulse@@ (0x0048b48c), .?AVLauncher@@ (0x0048b4a4),
-    .?AVLifeSupport@@ (0x0048b4c0), .?AVReactor@@ (0x0048b4dc), .?AVScanner@@ (0x0048b4f4),
-    .?AVShield@@ (0x0048b50c), .?AVTractor@@ (0x0048b5e0), .?AVTransporter@@ (0x0048b5f8),
-    .?AVTube@@ (0x0048b614), .?AVSystem@@ (0x0048b420, likely the shared base class),
-    .?AVShip@@ (0x0048b370), .?AVObject@@ (0x0048b328).
-[ ] These are the "name" field inside each class's RTTI TypeDescriptor object (the descriptor
-    itself starts ~8 bytes earlier, at name_addr - 8, per standard MSVC RTTI layout: vtable ptr +
-    spare + name). get_xrefs_to found ZERO hits on the raw name-string address directly for the
-    ones tried in Path B5 (this is the SAME "reference not visible to Ghidra's xref engine"
-    pattern as the Bank UI-command functions) - the TypeDescriptor is referenced from each
-    class's "RTTI Complete Object Locator" struct, which sits right before the vtable
-    (vtable[-1]). Try get_xrefs_to on (name_addr - 8) instead of the name string itself; if that
-    also comes up empty, fall back to the raw-byte-search technique (find_value_in_binary on the
-    TypeDescriptor's address, find_offset_to_va) to locate the Locator struct, then the vtable
-    right after it, then decompile methods pointed to by the vtable.
-[ ] Goal: match .?AVTube@@, .?AVLauncher@@, .?AVBattery@@, .?AVScanner@@, .?AVLifeSupport@@,
-    .?AVTransporter@@, .?AVImpulse@@ to concrete ship+offset slots (+0xb50, +0xbb8, +0xbf0,
-    +0x2a0, +0x454, +0x470, +0x9c0, +0xc00 are still unnamed - there are 8 unnamed slots and 7
-    unnamed RTTI classes, so one slot is probably NOT a per-instance subsystem, or one RTTI class
-    has zero live instances on ships).
-
-PRIORITY 2: Resolve the second 4.0 at 0x00478798 (30 min)
-[ ] Unchanged from Path B4/B5 - still zero direct-addressing xrefs. find_double_in_binary()
-    with section_filter='.data' to see its neighbors; check if 1.325817659497261 and
-    1.3276424705982208 (noted adjacent in PATH_B3_FINDINGS.md) match any per-ship-class stat.
-[ ] New idea from Path B5's RTTI discovery: check whether this address sits near any of the
-    RTTI-related data structures (TypeDescriptors, Locators, vtables) rather than a gameplay
-    stat table - the two investigations happened to surface data in similar-looking regions of
-    .data this session; worth ruling in or out early.
-
-PRIORITY 3: Confirm ship+0xec's identity, and reconcile the two reactor-rate chase paths (30 min)
-[ ] FUN_00418080 constructs ship+0xec (per PATH-B-FINDINGS.md). Decompile it directly.
-[ ] Path B5 found Bank's per-unit charge function reaches ITS reactor-rate double via a
-    DIFFERENT chase than Drive/Shield: unit+0x20 -> +0x14 -> +0x28, vs. ship+0xe8/0xec -> +0x38.
-    Trace both chases far enough to determine if they land on the SAME underlying Reactor
-    object (just reached via different intermediate links per subsystem type) or genuinely
-    different objects. This would settle whether ship+0xec is THE Reactor link or something else.
-
-PRIORITY 4: Confirm ship+0xf0 (new from Path B5) (20 min)
-[ ] Used in FUN_004035b0 as a "cached reactor output" total (divided by class+0x18 Dead Weight
-    Tonnage to get a power-to-weight ratio). PATH-B-FINDINGS.md already flags FUN_004035b0 as
-    referencing the string "reactor" (0x00464c3c), which supports this reading, but nothing
-    writes to ship+0xf0 was found this session. Find the writer - likely inside or near
-    FUN_0040a9a0 (Reactor's per-unit output summation) or its caller in FUN_00404250.
-
-PRIORITY 5 (if time remains): Explain how the Display struct (ENERGY_SYSTEM_MAP.md section 2.2)
-gets built (30 min)
-[ ] Unchanged from Path B4. Find where FUN_0040f4b0's display struct actually gets constructed
-    each frame/call - would let every offset there be mapped directly back to a Runtime Object
-    offset instead of via string-format inference.
-
-PRIORITY 6 (if time remains): What event does FUN_0040b510's cycle actually represent? (20 min)
-[ ] We know it fires a generic "%d %s%s %s!\n" notification via FUN_004182e0 when a
-    power-to-weight floor is cleared, for 5 subsystem slots. The specific noun/verb isn't known -
-    trace FUN_00401490 and FUN_00401560 (called just before the notify in FUN_004182e0) to see
-    if they set global "current message" state that would reveal the actual flavor text
-    (malfunction? random activation? something else entirely?).
+This session's biggest lesson: **a heuristic file-offset table built by searching for known numbers
+can be systematically wrong by a constant amount and still "confirm" several fields by coincidence**
+(see ENERGY_SYSTEM_MAP.md §3.9 and §8's new bullet). When a code-confirmed offset (from disassembly,
+applied to the actual runtime pointer) disagrees with a heuristic/file-offset-based one, trust the
+code-confirmed one, and if static analysis can't settle which is real, a live memory read can - see
+§3.9 for exactly how this session did that with the developer's own running copy of the game under
+Wine (no Cheat Engine needed - plain Python + /proc/<pid>/mem + sudo, since the default
+ptrace_scope=1 blocks same-user memory reads without it).
 
 ==================================================================================
-AFTER THIS SESSION
+NEXT STEP: COMBAT / DAMAGE FORMULAS
 ==================================================================================
 
-Update re_analysis/ENERGY_SYSTEM_MAP.md with whatever is resolved (don't create a parallel
-doc). Update energy_system_analysis.py's KNOWN_CONSTANTS dict if new constants are decoded.
-Write a new NEXT_SESSION_PROMPT.txt for whatever comes after. If Priorities 1-4 all close out
-this session, the energy-system investigation is essentially complete and the NEXT prompt
-should pivot to Path B7 - combat damage formulas and the personality/AI struct, per
-docs/handoff-PATH-B2-energy-analysis.md's still-open goals #3 and #4.
+The user chose this path (originally called "Path C" in their own guess) over personality/AI,
+the transporter/naming bug, and UI work. What actually happens when a weapon hits a ship - damage
+falloff by distance, shield absorption, armor/hull thresholds - and (a natural tie-in) whatever
+code path damages a Reactor unit, which would finally explain ship+0xf0's missing per-frame writer
+(ENERGY_SYSTEM_MAP.md §7 item 7 - still open, now known to be crew-based, not weight-based).
+`ship-struct-analysis.md`'s own TODO list already flags this ("Reverse combat damage model - linear
+vs. squared distance falloff").
+
+Useful running starts for this work:
+- The 13 confirmed class_data TypeRecord offsets (ENERGY_SYSTEM_MAP.md §3.8) almost certainly hold
+  the per-class damage/armor/hull stat fields combat code will read - decode more of their internal
+  fields as needed (only Bank's full record and Drive's/Shield's `+0x30`/`+0x38` are decoded so far;
+  Tube's is presumably a near-twin of Bank's, matching the existing note that its per-unit code
+  already mirrors Bank's).
+- `dump_doubles()`/`print_doubles()` in `binary_tools.py` are the right tool for reading TypeRecord
+  fields (doubles, not floats) - use the corrected file offsets from `ship-struct-analysis.md`.
+- If any newly-decoded field looks surprising or doesn't match the manual, don't trust it purely
+  from the (corrected, but not exhaustively re-verified) static file offsets - cross-check a couple
+  of ship classes against the manual the same way this session did for Bank/Drive/Shield, and
+  reach for a live memory read again if something still doesn't add up.
+
+STILL OPEN, LOWER PRIORITY (raise again if combat work naturally touches them):
+- Personality/AI struct (bravery/aggression values) - never located.
+- Transporter/ship-naming bug - the user remembers crew transport scrambling ship names in the UI.
+  This session's correction makes the existing lead (ENERGY_SYSTEM_MAP.md, end of §9) *more*
+  promising, not less: ship+0xe8 is now confirmed to be a shuffled SHIP NAME pointer (not a
+  surname), which matches the remembered symptom exactly. Worth revisiting if combat work stalls or
+  the user wants a break from stat-formula work.
+- class_data+0x00 (unidentified, zero for Heavy Cruiser) and class_data+0xC (a non-name-pool table
+  of doubles + a text fragment) - low priority, not blocking combat.
+- Display/Summary struct construction site, and FUN_0040b510's verb-text table - cosmetic, low
+  priority, same as before.
 
 ==================================================================================
 REMEMBER THE PEDAGOGICAL GOALS (from CLAUDE.md)
@@ -152,3 +105,6 @@ REMEMBER THE PEDAGOGICAL GOALS (from CLAUDE.md)
 2. One step at a time - check in with the user before moving to the next major finding
 3. Check for understanding
 4. Reuse and improve existing Python scripts rather than rewriting them
+5. The user can run the actual game and report what they see/test, INCLUDING live memory reads
+   (confirmed working this session, via Wine + /proc/<pid>/mem + sudo) - use this actively, not
+   just for bug-hunting paths but whenever static analysis produces a result worth double-checking.

@@ -1,8 +1,16 @@
 # Begin 3 Ship Class Structure
 ## Reverse-Engineered from Begin.exe
 
-**Date:** 2026-09-25  
+**Date:** 2026-09-25 (offsets corrected 2026-09-26, class-data mapping session)  
 **Status:** In-progress, Heavy Cruiser mostly complete  
+
+**CORRECTION (class-data mapping session, see `ENERGY_SYSTEM_MAP.md` §3.9 for the full story):**
+every file offset and "MAIN STATS SECTION" offset below was originally found by searching the
+binary for known manual numbers (crew=450, etc.), and that search was **off by 4 bytes** for every
+ship class — confirmed by a live memory read of the running game (`read_live_classdata.py`). The
+struct actually starts 4 bytes earlier than recorded here; crew is at `+0x18` (not `+0x14`), DWT at
+`+0x1C` (not `+0x18`), and so on. All offsets below are corrected in place; anywhere a `~` or `?`
+was already present it remains a genuine open question, not something this correction resolved.
 
 ---
 
@@ -16,53 +24,77 @@ Using the **Heavy Cruiser stats from the manual** (crew: 450, reactors: 7, shiel
 
 ## STRUCTURE LOCATION
 
-**File offset:** `0x0008858c` (Heavy Cruiser entry)  
-**Memory address (approx):** `0x00488590` (after PE header translation)  
-**Struct size:** ~1872 bytes (0x750) per ship class  
+**File offset:** `0x00088588` (Heavy Cruiser entry) — **corrected from `0x0008858c`, off by 4
+bytes; see the correction banner at the top of this doc**  
+**Memory address:** `0x00489988` — **corrected from `0x0048998c`**; confirmed live via
+`/proc/<pid>/mem` against a running copy of the game (Heavy Cruiser, class-data mapping session)  
+**Struct size:** ~1872 bytes (0x750) per ship class (unaffected by the offset correction — this was
+always a gap-to-next-entry measurement, not tied to the internal offset labeling)  
 
-**All ship class entries in Begin.exe:**
+**All ship class entries in Begin.exe (corrected, -4 from the original values):**
 | Ship Class | File Offset | Size |
 |---|---|---|
-| Dreadnought Killer (dink) | 0x00080fdc | 13,280 bytes |
-| Destroyer | 0x000843bc | 7,488 bytes |
-| Dreadnought (v1) | 0x000860fc | 4,680 bytes |
-| Dreadnought (v2) | 0x00087344 | 2,808 bytes |
-| Battle Cruiser | 0x00087e3c | 1,872 bytes |
-| Heavy Cruiser | 0x0008858c | (unknown, last entry) |
+| Dreadnought Killer (dink) | 0x00080fd8 | 13,280 bytes |
+| Destroyer | 0x000843b8 | 7,488 bytes |
+| Dreadnought (v1) | 0x000860f8 | 4,680 bytes |
+| Dreadnought (v2) | 0x00087340 | 2,808 bytes |
+| Battle Cruiser | 0x00087e38 | 1,872 bytes |
+| Heavy Cruiser | 0x00088588 | (unknown, last entry) |
 
-*(Note: Varying sizes suggest different subsystem block counts per class, or separate arrays for player vs. AI ships)*
+*(Note: Varying sizes suggest different subsystem block counts per class, or separate arrays for player vs. AI ships. Only Heavy Cruiser/Destroyer/Frigate's corrected offsets were independently re-verified this session against the manual — the Dreadnought/Battle Cruiser rows above just have the same -4 arithmetic applied and haven't been re-checked field-by-field.)*
 
 ---
 
 ## STRUCTURE LAYOUT: Heavy Cruiser
 
-### HEADER: String Pointers (bytes 0x00-0x13, 20 bytes)
+### HEADER (bytes 0x00-0x17, corrected — an extra field at the true +0x00 was missing before)
 ```
 Offset  Value           Purpose
 ------  -----           --------
-0x00    0x004649b4      PTR → "Heavy Cruiser" string
-0x04    0x004649b0      PTR → ??? (unknown)
-0x08    0x00481308      PTR → Weapon/subsystem 1 description
-0x0C    0x00482f80      PTR → Weapon/subsystem 2 description
-0x10    0x00482e80      PTR → Weapon/subsystem 3 description
+0x00    0                  Unidentified. Zero for Heavy Cruiser. NOT a vtable pointer (would be
+                           a non-zero address if it were) - open question, low priority.
+0x04    0x004649b4      PTR → "Heavy Cruiser" string
+0x08    0x004649b0      PTR → ??? (unknown, adjacent to the name string, maybe a short code/class tag string)
+0x0C    0x00481308      PTR → class_data+0xC's table - NOT a name pool (confirmed class-data
+                           mapping session): a mix of doubles and a text fragment ("We have
+                           examined your simulation results."). Real structure unresolved.
+0x10    0x00482f80      PTR → ship-name pool ("Enterprise, Hornet, Trenton, Lexington, Defiant,
+                           Independence, Republic" for Heavy Cruiser) - this is what `ship+0xe8`
+                           is built from (code-relative class_data+0x10; see
+                           `ENERGY_SYSTEM_MAP.md` §3.6/§3.9)
+0x14    0x00482e80      PTR → commanding-officer surname pool ("Webster, Bronson, Eastwood, Stone,
+                           Pike, Austin, Montgomery") - this is what `ship+0xec+0x8` is built from
+                           (code-relative class_data+0x14; see `ENERGY_SYSTEM_MAP.md` §3.7/§3.9)
 ```
 
-### MAIN STATS SECTION (bytes 0x14-0x6C, ~90 bytes)
+### MAIN STATS SECTION (bytes 0x18-0x70ish, corrected +4 from original) — confirmed fields only;
+everything past DWT below is still an open hypothesis, not a finding (see TODO item 7)
 ```
 Offset  Type    Value   Unit        Field Name
 ------  ----    -----   ----        ----------
-0x14    INT     450     crew        Crew count
-0x18    INT     20000   kt          Dead Weight Tonnage (DWT)
-0x1C    FLOAT   2.531   ?           Power conversion/efficiency?
-0x20    FLOAT   2.125   ?           Battery efficiency?
-0x24    FLOAT   2.125   ?           Warp efficiency?
-...     FLOAT   ...     ?           (several more power/efficiency floats)
-0x34    INT     7       count       Number of reactors
-0x3C    INT     60      cycles?     Torpedo load time?
-0x40    INT     25      EU          Shield power consumption per shield
-0x44    INT     10      EU          Phaser/Torpedo charge buildup amount
-0x48    INT     25      EU          Shield power usage?
-0x4C    INT     99      count?      Probe capacity?
+0x18    INT     450     crew        Crew count — **confirmed** by code (disassembly of
+                                     `FUN_00418080` and `FUN_004035b0`, both use this offset
+                                     directly on the runtime class_data pointer) AND by a live
+                                     memory read of a running game (class-data mapping session).
+                                     Corrected from the old (wrong) `+0x14` label.
+0x1C    INT     20000   kt          Dead Weight Tonnage (DWT) — corrected from the old `+0x18` label
+0x20    FLOAT   2.531   ?           Power conversion/efficiency? — **unverified**, and possibly
+                                     wrong data type: the ship constructor reads *doubles* (not
+                                     4-byte floats) from this general region via `FUN_00401de0`
+                                     (see `ENERGY_SYSTEM_MAP.md` §7 item 10) — needs re-deriving
+                                     from code, not re-labeled by number-matching
+0x24    FLOAT   2.125   ?           Battery efficiency? — unverified, same caveat as above
+0x28    FLOAT   2.125   ?           Warp efficiency? — unverified, same caveat as above
+...     FLOAT   ...     ?           (several more power/efficiency floats) — unverified
+0x38    INT     7       count       Number of reactors — unverified at this specific offset (the
+                                     code-confirmed Reactor TypeRecord count lives at the very
+                                     different, verified offset `class_data+0x58`, see
+                                     `ENERGY_SYSTEM_MAP.md` §3.8 — don't conflate the two)
+0x40    INT     60      cycles?     Torpedo load time? — unverified
+0x44    INT     25      EU          Shield power consumption per shield — unverified
+0x48    INT     10      EU          Phaser/Torpedo charge buildup amount — unverified
+0x4C    INT     25      EU          Shield power usage? — unverified
+0x50    INT     99      count?      Probe capacity? — unverified
 ...     (padding and alignment)
 ```
 
@@ -83,15 +115,17 @@ Offset  Type    Value   Unit        Field Name
 +0x24-  ...     additional fields (variable)
 ```
 
-**Confirmed subsystem blocks in Heavy Cruiser:**
+**Confirmed subsystem blocks in Heavy Cruiser** (offsets shown with the same +4 correction applied
+as everywhere else in this doc; per TODO item 1, this may be a *second*, separate table from the
+code-confirmed TypeRecords in `ENERGY_SYSTEM_MAP.md` §3.8 — not re-verified by code this session):
 
 | Subsystem | Offset | Count | Notes |
 |-----------|--------|-------|-------|
-| Shields | 0x618 | 6 | 6 shield generators, 225 EU each, 0.90% regen |
-| Phasers | 0x650 | 4 | 4 phaser banks, 2000 range, 10 EU charge |
-| Torpedos | 0x668-... | 6 | 6 torpedo tubes, 10 EU buildup, 3 cycle load |
-| Probes | 0x758 | 3 | 3 probe launchers |
-| Warp | 0x710 | 2 | 2 warp drives, 285 EU each |
+| Shields | 0x61C | 6 | 6 shield generators, 225 EU each, 0.90% regen |
+| Phasers | 0x654 | 4 | 4 phaser banks, 2000 range, 10 EU charge |
+| Torpedos | 0x66C-... | 6 | 6 torpedo tubes, 10 EU buildup, 3 cycle load |
+| Probes | 0x75C | 3 | 3 probe launchers |
+| Warp | 0x714 | 2 | 2 warp drives, 285 EU each |
 | Batteries | (TBD) | ? | ? battery units |
 | Life Support | (TBD) | ? | ? life support modules |
 
@@ -127,11 +161,38 @@ Alignment appears to be 4-byte boundaries (word-aligned on x86).
 
 ## UNKNOWNS / TODO
 
-1. **Exact subsystem block boundaries** — need to identify where Shield block ends and Phaser block starts (offsets only approximate)
+1. ~~**Exact subsystem block boundaries**~~ **Superseded — see `ENERGY_SYSTEM_MAP.md` §3.8.** The
+   "subsystem blocks" described below (Shields at `+0x618`, Phasers at `+0x650`, etc.) were found by
+   scanning raw bytes for known manual numbers, without knowing the real struct shape. Code-tracing
+   every subsystem's constructor (the class-data mapping session) found a **different, earlier, and
+   complete** set of 13 per-subsystem "TypeRecord" pointers at `+0x58` through `+0x380` — Reactor,
+   Battery, Bank, Tube, Launcher, Drive, Shield, Transporter, Scanner, Cloak, Impulse, Tractor,
+   LifeSupport, in that order, each confirmed by finding the actual `class_data+offset` constant in
+   its `ConstructArray` function. The `+0x618`-region blocks below may be a second, different table
+   (unconfirmed) rather than the same one — don't assume they're the same data restated.
 2. **Pointer interpretation** — what do the 2-3 subsystem description pointers point to? Are they weapon stats, flavor text, etc.?
 3. **Float encoding** — the regen rate 1.9000 = 0.90% from manual, but relationship unclear
 4. **Struct size variance** — why are earlier ship entries larger? Multiple subsystems? Separate player/AI tables?
-5. **Missing subsystems** — where are Batteries, Life Support, Damage Control in the struct? Are they in separate tables?
+5. ~~**Missing subsystems**~~ **Resolved — see `ENERGY_SYSTEM_MAP.md` §3.8.** Batteries and Life
+   Support (and all other subsystems) are not missing or in a separate table — they're TypeRecords
+   at `class_data+0x90` (Battery) and `class_data+0x348` (LifeSupport), found the same way as the
+   others.
+6. **NEW — decode the 13 TypeRecords' contents** (`ENERGY_SYSTEM_MAP.md` §3.8/§7 item 9b, in
+   progress). Offsets are known; internal field meanings (cost, charge rate, capacity, range,
+   damage...) mostly aren't yet, except Bank's `+0x38`=`maxCharge`.
+7. **RESOLVED, then corrected again — see `ENERGY_SYSTEM_MAP.md` §3.9.** This item originally
+   flagged that `ENERGY_SYSTEM_MAP.md` §7 item 10 found three **doubles** read from
+   `class_data+0x28/+0x30/+0x40`, contradicting this doc's old guess of three 4-byte floats at
+   (uncorrected) `+0x1C/+0x20/+0x24`. It turned out the deeper problem was that this doc's entire
+   file-offset table was off by 4 bytes (§3.9) — now fixed throughout this document. Crew (`+0x18`)
+   and DWT (`+0x1C`) are confirmed by code AND a live memory read; everything past DWT in the "MAIN
+   STATS SECTION" table remains an open hypothesis, not a finding, including whether the
+   `class_data+0x28/+0x30/+0x40` doubles even correspond to any of the guessed float fields there.
+8. **NEW — `class_data+0x00` and `class_data+0xC` are still unidentified** (class-data mapping
+   session). `+0x00` is `0` for Heavy Cruiser and isn't a vtable pointer. `+0xC` points to a mixed
+   table of doubles and a text fragment ("We have examined your simulation results.") that doesn't
+   match the 17-byte-record-stride name-pool pattern used by `+0x10`/`+0x14`. Neither was resolved
+   this session.
 
 ---
 

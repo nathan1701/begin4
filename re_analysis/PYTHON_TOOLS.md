@@ -11,7 +11,7 @@
 ## 📋 Available Scripts
 
 ### 1. `binary_tools.py` 
-**Status:** ✅ Active (created in earlier session)  
+**Status:** ✅ Active (created in earlier session, extended in the class-data mapping session)  
 **Size:** 5.0K  
 **Purpose:** General binary file analysis utilities
 
@@ -20,6 +20,17 @@
 - `print_dump(entries, header="")` - Pretty-print binary dumps with type inference
 - `compare_ship_entries(binary_path, ships)` - Compare multiple ship data structures side-by-side
 - `find_value_in_binary(binary_path, value, show_context=True)` - Search for 32-bit integer values in binary
+- `dump_doubles(binary_path, file_offset, count=8)` - **New in the class-data mapping session.**
+  Reads a run of consecutive 8-byte IEEE 754 doubles — `dump_ship_entry` only interprets 4-byte
+  ints/floats, but the class-data TypeRecord fields (reactor rate, charge rate, capacity) turned
+  out to be doubles.
+- `print_doubles(entries, header="")` - Pretty-print a `dump_doubles()` result.
+
+**Also in this directory:** `read_live_classdata.py` (new, class-data mapping session) - a
+one-off diagnostic (not part of the general toolkit, kept for reference) that reads a running
+Begin.exe's live `class_data` struct via `/proc/<pid>/mem`, needed to catch and confirm the off-by-4
+file-offset bug described below. Usage: `sudo python3 read_live_classdata.py <PID>` (needs root
+because of `ptrace_scope=1` — same-user access alone isn't enough to read another process's memory).
 
 **Usage Example:**
 ```python
@@ -93,6 +104,13 @@ hits = find_double_in_binary('/path/to/Begin.exe', 4.0, section_filter='.rdata')
   repeated `sub esp, N` prologue after `cc cc` padding), check `get_function_by_address` /
   `decompile_function_by_address` again — if Ghidra still says "no function found," it has to be
   decoded by hand.
+- **Path B6 workflow:** when a suspected constant turns out to have zero direct xrefs *and* isn't
+  a missing-function case (the code reading it really is indexed/computed addressing), dump a wide
+  contiguous range of raw doubles around it with `struct.unpack('<d', ...)` in a loop (see this
+  session's transcript) rather than guessing at neighbors one at a time. This is how the second
+  `4.0` at `0x00478798` turned out to be one row of a 257-row `atan()` lookup table (step size
+  `1/32` from `0` to `8`) — a pattern only visible once ~30+ consecutive rows were dumped and
+  compared against `math.atan()` in Python.
 
 **Corrected understanding (Path B4) — full details in `ENERGY_SYSTEM_MAP.md`:**
 There is **no single "4:1 WES:RES ratio" constant**. `0x00464688` = 100.0, a generic
@@ -137,7 +155,10 @@ git commit -m "Update PYTHON_TOOLS.md: Add new_tool.py entry"
 | B3 | Deep dive | — | Verified the constant, found it was 100.0 not 4.0; found real 4.0 elsewhere |
 | B4 | Energy system, complete | `energy_system_analysis.py` (bug-fixed + extended) | Fixed VA→offset bug; mapped Drive & Shield's real 4x mechanisms; corrected 3 mis-identified display fields; wrote `ENERGY_SYSTEM_MAP.md` |
 | B5 | Weapon power draw + `FUN_0040b510` | `energy_system_analysis.py` (added `file_offset_to_va`) | Traced Bank's real energy function (no 4.0, no ratio — closes the WES:RES question for good); identified `FUN_0040b510` as an unrelated malfunction/event system; hand-disassembled 2 functions Ghidra never analyzed |
-| B6+ | Future | TBD | Resolve second 4.0 at `0x00478798`; confirm `ship+0xec`/`ship+0xf0`; name remaining subsystem slots via RTTI class strings; Display struct construction |
+| B6 | Name remaining subsystem slots, resolve 2nd 4.0 | none new | Named all 13 runtime subsystem slots via `FUN_004035b0`'s per-slot noun strings; corrected 2 mis-identified slots (`0xb88`/`0xc20`); resolved `0x00478798` as a row of an `atan()` lookup table |
+| B7 | Reactor-rate chase unification, `ship+0xe8`/`0xec`/`0xf0` | none new (used existing `va_to_file_offset`/`file_offset_to_va`) | Found `unit+0x30`(Drive)/`+0x34`(Shield) are array-container back-pointers, not ship back-pointers — same shape as Bank/Tube's `+0x20`; unified all three into one "unit → array → fixed class-data pointer → static double" mechanism; found `ship+0xe8` is a shuffled commanding-officer-name pointer, not "crew count"; found a likely genuine construction-time bug in `FUN_00418080`; confirmed `ship+0xf0` is an int (DWT-copy) with no per-frame writer found. Full writeup: `ENERGY_SYSTEM_MAP.md` §3.6/§3.7/§7. |
+| Class-data mapping | Full class_data TypeRecord table + off-by-4 fix | `binary_tools.py` (added `dump_doubles`/`print_doubles`), `read_live_classdata.py` (new) | Traced all 13 subsystem `ConstructArray` functions to find the complete TypeRecord offset table in `class_data` (§3.8); found and fixed a session-crossing off-by-4 bug in `ship-struct-analysis.md`'s static file offsets via a live `/proc/<pid>/mem` read of the running game, which reversed two of Path B7's headline findings (`ship+0xe8` is a ship name not a surname; `ship+0xec`'s field is a legitimate surname pointer, not a bug) and corrected `ship+0xf0`/`FUN_004035b0`'s ratio from "power-to-weight" to crew-based (§3.9). Done as a prerequisite to combat-damage work. |
+| B8+ | Future — combat damage formulas (see `NEXT_SESSION_PROMPT.txt`) | TBD | Combat damage formulas; personality/AI struct; optionally Display struct construction and `FUN_0040b510` verb text (both low-priority cosmetic loose ends) |
 
 ---
 
@@ -164,6 +185,6 @@ Each script is a learning milestone. Keep them, improve them, learn from them.
 
 ---
 
-**Last Updated:** 2026-09-26 (Path B5)
+**Last Updated:** 2026-09-26 (class-data mapping session)
 **Maintained By:** Claude (AI Assistant)
 **For:** Begin 4 Project

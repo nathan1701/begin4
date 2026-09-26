@@ -56,6 +56,42 @@ def dump_ship_entry(binary_path: str, file_offset: int, size: int = 256) -> List
     return results
 
 
+def dump_doubles(binary_path: str, file_offset: int, count: int = 8) -> List[Tuple[int, float]]:
+    """
+    Dump a run of consecutive 8-byte IEEE 754 doubles from the binary.
+
+    Added for the class-data TypeRecord mapping session: dump_ship_entry() only
+    interprets 4-byte ints/floats, but the per-subsystem TypeRecord fields found
+    in that session (reactor rate, charge rate, capacity, etc.) are doubles.
+
+    Args:
+        binary_path: Path to Begin.exe
+        file_offset: File offset to start reading from
+        count: Number of consecutive doubles to read (default 8, i.e. 64 bytes)
+
+    Returns:
+        List of (address, value) tuples, one per double.
+    """
+    with open(binary_path, 'rb') as f:
+        f.seek(file_offset)
+        data = f.read(count * 8)
+
+    results = []
+    for i in range(0, len(data) - 7, 8):
+        value = struct.unpack('<d', data[i:i+8])[0]
+        results.append((file_offset + i, value))
+    return results
+
+
+def print_doubles(entries: List[Tuple[int, float]], header: str = "") -> None:
+    """Pretty-print a dump_doubles() result."""
+    if header:
+        print(f"\n{header}")
+        print("=" * 60)
+    for address, value in entries:
+        print(f"0x{address:08x}: {value}")
+
+
 def print_dump(entries: List[Tuple[int, int, str, str, str]], header: str = "") -> None:
     """Pretty-print a ship struct dump."""
     if header:

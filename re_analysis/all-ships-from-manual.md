@@ -43,11 +43,16 @@ Extracted from the Advanced Strategy Manual, Appendix C.
 
 ## Next: Fill Binary Values
 
-The following ships have been located in the binary (file offsets):
-- Heavy Cruiser: 0x0008858c (crew=450 ✓)
-- Destroyer: 0x000843bc (crew=250, manual says 200)
-- Frigate: 0x00087a94 (crew=175 ✓)
-- Battle Cruiser: 0x00087e3c (need to dump)
-- Dreadnought: 0x000860fc, 0x00087344 (need to verify)
-- Dreadnought Killer: 0x00080fdc (need to dump)
+**CORRECTED (class-data mapping session, 2026-09-26) — see `ENERGY_SYSTEM_MAP.md` §3.9:** these
+file offsets were originally off by 4 bytes (found by searching for crew/DWT numbers under the
+wrong struct base — confirmed via a live memory read of the running game). Also, crew lives at
+`class_data+0x18` now, not `+0x14` — see `ship-struct-analysis.md`'s corrected header table.
+
+The following ships have been located in the binary (file offsets, corrected -4 from the original):
+- Heavy Cruiser: 0x00088588 (crew=450 ✓, re-verified this session)
+- Destroyer: 0x000843b8 (crew=250, manual says 200; re-verified this session)
+- Frigate: 0x00087a90 (crew=175 ✓, re-verified this session)
+- Battle Cruiser: 0x00087e38 (need to dump - offset corrected but not re-checked)
+- Dreadnought: 0x000860f8, 0x00087340 (need to verify - offsets corrected but not re-checked)
+- Dreadnought Killer: 0x00080fd8 (need to dump - offset corrected but not re-checked)
 

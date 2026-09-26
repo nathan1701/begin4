@@ -236,10 +236,18 @@ KNOWN_CONSTANTS: Dict[int, Dict[str, any]] = {
     },
     0x00478798: {
         'value': 4.0,
-        'role': 'Second, separate 4.0 literal in .data',
+        'role': 'RESOLVED (Path B6): row 128 of a 257-row arctangent lookup table, NOT a balance constant',
         'confirmed_uses': [],
-        'note': 'UNRESOLVED - zero direct-addressing xrefs found. Likely reached via indexed/array '
-                'addressing, not a literal FMUL [addr]. Open question for Path B5.',
+        'note': 'The table runs from VA 0x477ba8 to 0x479390, 24 bytes/row (3 doubles: A, B, C), with '
+                'B stepping by exactly 1/32 from 0.03125 to 8.0 (256 steps). C(B) == atan(B rounded up '
+                'to the next step) - verified exactly, e.g. C at B=0.0625 equals atan(0.09375) to full '
+                'double precision - and the final row hard-codes C=pi/2 as the asymptotic clamp instead '
+                'of atan(8.0). 0x00478798 is simply the B-column cell holding the value 4.0 partway '
+                'through this table; it is addressed by computed index elsewhere in the code, which is '
+                'why get_xrefs_to never found a direct reference. Column A (~1e-9 to 1e-8) is a small '
+                'per-row correction term whose exact role in the interpolation was not pinned down - '
+                'not needed once the table was identified as unrelated to energy. Zero connection to '
+                'the reactor/energy system.',
     },
     0x00464bd0: {
         'value': 0.5,
@@ -252,11 +260,15 @@ KNOWN_CONSTANTS: Dict[int, Dict[str, any]] = {
                 "It's a generic phase/percent-chance cycle (same shape as Drive's charge cycle, "
                 "reusing FUN_004013e0's percent-roll helper) driven by a SEPARATE ship-wide "
                 "'power-to-weight ratio' (reactor output / dead-weight-tonnage, computed in "
-                "FUN_004035b0) rather than the per-frame reactor pool from FUN_00404250. Called for "
-                "5 subsystem slots: ship+0xb50, +0xb88 (Tractor), +0xbb8, +0xbf0, +0xc20 (Cloak). "
-                "Reports events via FUN_004182e0's generic '%d %s%s %s!\\n' notifier. Both the 4.0 "
-                "and 0.5 uses here are coincidental reuse of the same literals, structurally unrelated "
-                "to Drive/Shield's energy math. See ENERGY_SYSTEM_MAP.md section 3.4.",
+                "FUN_004035b0) rather than the per-frame reactor pool from FUN_00404250. Path B6 "
+                "fully disassembled FUN_004035b0 and found it actually covers ALL 13 subsystem "
+                "slots (not just 5 as Path B5 estimated), each via its own thin wrapper, with a "
+                "type-specific noun string ('shield generator','tube','bank','probe launcher',"
+                "'warp drive','reactor','battery cell','transporter','scanner','cloak','tractor',"
+                "'impulse engire','life support') passed to FUN_004182e0's generic "
+                "'%d %s%s %s!\\n' notifier. Both the 4.0 and 0.5 uses here are coincidental reuse "
+                "of the same literals, structurally unrelated to Drive/Shield's energy math. See "
+                "ENERGY_SYSTEM_MAP.md section 3.5.",
     },
     0x00465088: {'value': 12.0, 'role': "Drive 'ready' charge threshold", 'confirmed_uses': ['FUN_00409740']},
     0x00465488: {
@@ -425,7 +437,7 @@ def analyze_wes_res_ratio(binary_path: str) -> Dict[str, any]:
         'critical_addresses': {
             '0x00464688': '100.0 - generic percent-to-fraction (NOT energy-specific)',
             '0x00464ad8': 'The real 4.0 - reused for Drive AND Shield (different rules)',
-            '0x00478798': 'Second 4.0 - unresolved, no direct xrefs found',
+            '0x00478798': 'Second 4.0 - RESOLVED Path B6: one row of a 257-entry atan() lookup table, unrelated to energy',
             '0x0040f871': 'Display FMUL #1 - Shield charge percentage (not "unknown field")',
             '0x0040f997': 'Display FMUL #2 - Drive charge percentage (not "reactor power")',
             '0x0040fc87': 'Display FMUL #3 - likely Cloak charge percentage (not "shield capacity")',
