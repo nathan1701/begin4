@@ -288,8 +288,12 @@ decompiler output instead of a heuristic file-offset table. (Cross-referenced in
 7. Cross-reference the 13-subsystem malfunction roll here against `FUN_0040b510`'s existing
    malfunction/event system (`ENERGY_SYSTEM_MAP.md` §3.5/§7 item 8) — same event queue feeding the
    same flavor text, or two independent systems that happen to both roll against all 13 subsystems?
-9. `FUN_00403210` (called when crew drops under 6) — presumed derelict/abandon-ship handler, not
-   decoded.
+9. **CONFIRMED (`TORPEDO_IMPACT` session)** — `FUN_00403210` (called when crew drops under 6) zeroes
+   `ship+0xf0` (crew count) plus seven adjacent fields (`+0xf4` through `+0x10c`), a full crew-wipe.
+   Matches the developer's own live account of a "blue," hull-intact, crewless ship encountered in
+   play, boardable and reactivatable — real derelict/capture mechanic, not just a code-shape guess
+   anymore. See `TORPEDO_IMPACT_MAP.md` §5. What actually triggers/handles a successful boarding is
+   still unknown — good next-session candidate.
 
 **Position/geometry:**
 8. Pin down exact roles of `ship+0x20/+0x28/+0x58/+0x60/+0x80/+0x88/+0xa8/+0xb0/+0xb8/+0xC8` —
@@ -299,14 +303,13 @@ decompiler output instead of a heuristic file-offset table. (Cross-referenced in
    formulas above were.
 
 **Next session, structurally different path:**
-10. **Torpedo (Tube) equivalent of this entire chain is untraced.** Everything in this document comes
-    from Bank/phasers specifically. Torpedoes are physical projectiles with travel time and an
-    "arming distance" (per the manual's own flavor strings, `ENERGY_SYSTEM_MAP.md`/game strings) —
-    the hit-resolution shape is likely genuinely different (a projectile object that later collides,
-    vs. Bank's instant same-frame target scan), not just "a near-twin of Bank" — that assumption in
-    `PYTHON_TOOLS.md` was specifically about *power-draw*, not hit resolution. Good candidate for
-    picking up weapon-type `1` too (the shield-bypass type found in §2.2 — worth checking if that's
-    torpedoes).
+10. **Substantially traced (`TORPEDO_DAMAGE` + `TORPEDO_IMPACT` sessions)** — see
+    `TORPEDO_DAMAGE_MAP.md` (fire chain through launch) and `TORPEDO_IMPACT_MAP.md` (post-launch:
+    global in-flight list, per-ship-per-turn hit resolution, live-confirmed immediate damage
+    application). Confirmed genuinely different from Bank's instant hit-scan, as this item
+    predicted. Still open: the exact array `FUN_004089b0` writes damage into isn't confirmed to be
+    this document's Shield array (`TORPEDO_IMPACT_MAP.md` §2.4/§6 item 3), so weapon-type `1`
+    (shield-bypass) still hasn't been confirmed as what torpedoes pass.
 
 ---
 
@@ -344,6 +347,16 @@ combat-specific delta):
 | `+0x48` | Static per-weapon range stat (§6 item 11) |
 
 **Shield unit** (per-unit fields, array at `ship+0x7f8`; extends what §3.6/§3.9 already had):
+
+**Container layout correction (`TORPEDO_IMPACT` session):** unlike Tube (`ship+0x454`) and Bank
+(`ship+0x438`), which are containers holding a *pointer* to a packed array of separately-allocated
+unit pointers, Shield's array is **embedded in-place**: count (ushort) at `container+0x0`, then
+units packed directly starting at `container+0x8`, stride `0x48` bytes, no pointer indirection at
+all. Confirmed by decompiling the facing-selection function (`FUN_0040b180`) directly rather than
+assuming the same shape as Tube/Bank — that assumption caused a real live-testing crash (an
+`OSError` reading through a garbage pointer) before being caught. **Don't assume every subsystem
+array shares one container shape without checking** — see `TORPEDO_IMPACT_MAP.md` §7 for the full
+story.
 
 | Offset | Field |
 |---|---|

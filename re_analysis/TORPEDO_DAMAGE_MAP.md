@@ -276,14 +276,15 @@ that might run long enough to cross a destruction/battle-end boundary.
    session was a single tube at a time. Worth testing directly: fire two or more tubes at the exact
    same locked target in the same turn (if the game's command interface allows a true simultaneous
    multi-tube fire) and watch for `+0x58` incrementing above 1 and a merged announcement string.
-5. **The big one, structurally different from anything in `COMBAT_DAMAGE_MAP.md`:** the projectile
-   object's own per-frame/per-turn update — travel, the "arms after N cycles" timer, the
-   collision/hit check, and wherever the actual damage-on-impact call to `Ship::vftable+0x34`
-   (`FUN_00404d90`, already known) happens for torpedoes. `FUN_0040bf70` only *creates and launches*
-   the object; nothing in this session traced what runs on it afterward. Likely candidates for a next
-   pass: search for other callers of `FUN_00405830`/other methods on the same vtable as the
-   projectile object, or look for a second, separate list/array (distinct from the ship list Bank
-   scans) that per-frame code iterates to update in-flight projectiles.
+5. **RESOLVED (`TORPEDO_IMPACT` session) — see `TORPEDO_IMPACT_MAP.md`.** The projectile
+   self-registers into a global in-flight list via a virtual call through its own vtable
+   (`Torp::vftable+0x20`); a per-ship-per-turn function (`FUN_00406f10`) walks that list and rolls
+   hit-chance/damage against each ship. It does **not** call the already-known `Ship::vftable+0x34`
+   directly — it writes into a still-unidentified array instead (`TORPEDO_IMPACT_MAP.md` §2.4, §6
+   item 3) — but live testing confirmed the resulting damage is applied immediately, same turn as
+   the hit, not deferred. Still open from that session: no removal-from-list function found, and the
+   "arms after N cycles" timer specifically wasn't traced (nothing in the chain found this session
+   visibly gates on a cycle count — see `TORPEDO_IMPACT_MAP.md` §6 for the full remaining list).
 6. Confirm whether weapon type `1` (the shield-bypassing type found in `COMBAT_DAMAGE_MAP.md` §2.2)
    is actually passed by the torpedo's eventual damage-application call — requires finding the code
    from item 5 first.

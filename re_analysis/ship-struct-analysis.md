@@ -215,12 +215,14 @@ Alignment appears to be 4-byte boundaries (word-aligned on x86).
 5. ~~**Reverse combat damage model** — linear vs. squared distance falloff for different weapon
    types.~~ **Done for phasers/Bank — see `COMBAT_DAMAGE_MAP.md`.** Confirmed **linear** falloff
    (`1 − distance/maxRange`, not squared) for the phaser/Bank weapon path specifically. **Torpedo/Tube
-   fire chain now traced through launch (`TORPEDO_DAMAGE` session, see `TORPEDO_DAMAGE_MAP.md`)** —
-   confirmed torpedoes really are physical projectile objects (`FUN_0043d97e(0x118)` allocation),
-   genuinely different from Bank's instant hit-scan, not just a near-twin with a different range
-   formula. **Still open: everything after launch** — the projectile's own travel/arming-timer/
-   collision/impact code, where any damage falloff for torpedoes specifically would live
-   (`TORPEDO_DAMAGE_MAP.md` §5 item 5) — completely untraced.
+   fire chain traced through launch AND post-launch impact (`TORPEDO_DAMAGE` + `TORPEDO_IMPACT`
+   sessions, see `TORPEDO_DAMAGE_MAP.md` and `TORPEDO_IMPACT_MAP.md`)** — confirmed torpedoes really
+   are physical projectile objects (`FUN_0043d97e(0x118)` allocation) that self-register into a
+   global in-flight list and get checked for hits by a per-ship-per-turn function; live testing
+   confirmed the resulting damage applies **immediately**, same turn as the hit, same as phasers.
+   **Still open:** the "arms after N cycles" timer specifically was never traced (nothing found this
+   session visibly gates on a cycle count), and the array the damage-dispatch function writes into
+   isn't confirmed to be the same Shield array phasers use (`TORPEDO_IMPACT_MAP.md` §6).
 
 ---
 

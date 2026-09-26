@@ -950,3 +950,16 @@ two real play sessions (one ending in the player's own ship being destroyed mid-
 crashed an early version of the watch script and got fixed). The projectile's own flight/collision/
 impact code — where torpedo damage actually gets applied — is still completely untraced
 (`TORPEDO_DAMAGE_MAP.md` §5 item 5), the natural next session's target.
+
+**Update (`TORPEDO_IMPACT` session):** the projectile's post-launch behavior is now traced — see the
+new `TORPEDO_IMPACT_MAP.md`. Torpedoes self-register into a global in-flight list, and a per-ship-
+per-turn function checks that list and rolls hit-chance/damage; live testing across two real fights
+confirmed the resulting damage applies immediately (same turn), not deferred. Also, unprompted, this
+session's live play directly confirmed two things this doc had only ever hypothesized: the
+detection-gated stale-position mechanic (§3 of `COMBAT_DAMAGE_MAP.md`) and — the standout find — the
+"transporting crew scrambles ship names" lead noted just above turned out to be adjacent to a real,
+now-confirmed mechanic: a ship whose crew is fully wiped out (`FUN_00403210`) becomes a derelict,
+boardable and reactivatable, matching the developer's own live account of doing exactly that.
+Nothing about that lead's original ship-naming-bug question was resolved directly, but the boarding/
+capture mechanic itself is now a strong, concrete candidate for a future session — see
+`TORPEDO_IMPACT_MAP.md` §5/§6 item 5. Nothing else in this doc changed this session.

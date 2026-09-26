@@ -27,21 +27,35 @@
 - `print_doubles(entries, header="")` - Pretty-print a `dump_doubles()` result.
 
 **Also in this directory:** `read_live_classdata.py` (new in the class-data mapping session,
-extended in `COMBAT_DAMAGE`, **extended again in `TORPEDO_DAMAGE`**) - a one-off diagnostic (not
-part of the general toolkit, kept for reference) that reads a running Begin.exe's live `class_data`
-struct via `/proc/<pid>/mem`, needed to catch and confirm the off-by-4 file-offset bug described
-below. `COMBAT_DAMAGE` added reads for `class_data+0x380/+0x390/+0x3a0` and the live ship's own
-`+0x110`, used to confirm Begin 3 has no accumulating hull-HP pool (see `COMBAT_DAMAGE_MAP.md` §0).
-`TORPEDO_DAMAGE` added a `--watch [duration]` mode (`watch_tubes()`) that polls `ship+0x454`'s Tube
-array repeatedly under one `sudo` prompt, printing only tubes whose fields changed since the last
-poll — needed because a single before/after snapshot completely missed the transient `ready(+0x30)`
-flag, and a real live play session is long enough that repeated `sudo` prompts would otherwise be
-disruptive. Also hardened against the ship pointer going stale mid-watch (battle ending, ship
-destroyed) after this happened for real and crashed an earlier version — see
-`TORPEDO_DAMAGE_MAP.md` §2.5. Usage: `sudo python3 read_live_classdata.py <PID>` for a single
-snapshot (now including the Tube array), or `sudo python3 read_live_classdata.py <PID> --watch
-[duration_seconds]` (needs root because of `ptrace_scope=1` — same-user access alone isn't enough to
-read another process's memory).
+extended in `COMBAT_DAMAGE`, extended again in `TORPEDO_DAMAGE`, **extended again in
+`TORPEDO_IMPACT`**) - a one-off diagnostic (not part of the general toolkit, kept for reference)
+that reads a running Begin.exe's live `class_data` struct via `/proc/<pid>/mem`, needed to catch and
+confirm the off-by-4 file-offset bug described below. `COMBAT_DAMAGE` added reads for
+`class_data+0x380/+0x390/+0x3a0` and the live ship's own `+0x110`, used to confirm Begin 3 has no
+accumulating hull-HP pool (see `COMBAT_DAMAGE_MAP.md` §0). `TORPEDO_DAMAGE` added a `--watch
+[duration]` mode (`watch_tubes()`) that polls `ship+0x454`'s Tube array repeatedly under one `sudo`
+prompt, printing only tubes whose fields changed since the last poll — needed because a single
+before/after snapshot completely missed the transient `ready(+0x30)` flag, and a real live play
+session is long enough that repeated `sudo` prompts would otherwise be disruptive. Also hardened
+against the ship pointer going stale mid-watch (battle ending, ship destroyed) after this happened
+for real and crashed an earlier version — see `TORPEDO_DAMAGE_MAP.md` §2.5.
+
+`TORPEDO_IMPACT` added a `--watch-combat [duration]` mode (`watch_combat()`/`_snapshot_combat()`)
+that polls a ship's hit-counters (`+0x134`/`+0x128`/`+0x12C`) and the Shield array (`ship+0x7f8`)'s
+per-unit hits/charge%/integrity, used to live-confirm torpedo damage applies immediately rather than
+being deferred a turn (see `TORPEDO_IMPACT_MAP.md` §3). Building it surfaced two real bugs, both
+fixed and both worth remembering: (1) a wrong container-layout assumption — copy-pasted Tube's
+"pointer to a packed array of unit pointers" shape onto Shield without checking, when Shield's array
+is actually embedded in-place with no pointer indirection; caught by an `OSError` reading through
+the resulting garbage pointer, fixed by decompiling the real facing-selection function instead of
+assuming uniformity across subsystems (`TORPEDO_IMPACT_MAP.md` §7); (2) the watch loops' per-poll
+ship-pointer re-read used a bare `read_mem()` that raised `FileNotFoundError` if the whole game
+*process* exited (not just the ship pointer going stale) — fixed with a new `read_mem_or_none()`
+helper, applied to both `watch_tubes()` and `watch_combat()`. Usage: `sudo python3
+read_live_classdata.py <PID>` for a single snapshot (now including the Tube array), `sudo python3
+read_live_classdata.py <PID> --watch [duration_seconds]`, or `sudo python3 read_live_classdata.py
+<PID> --watch-combat [duration_seconds]` (all need root because of `ptrace_scope=1` — same-user
+access alone isn't enough to read another process's memory).
 
 **Usage Example:**
 ```python
@@ -180,6 +194,7 @@ retroactively.
 | `CLASS_DATA_MAPPING` (2026-09-26) | Full class_data TypeRecord table + off-by-4 fix | `binary_tools.py` (added `dump_doubles`/`print_doubles`), `read_live_classdata.py` (new) | Traced all 13 subsystem `ConstructArray` functions to find the complete TypeRecord offset table in `class_data` (§3.8); found and fixed a session-crossing off-by-4 bug in `ship-struct-analysis.md`'s static file offsets via a live `/proc/<pid>/mem` read of the running game, which reversed two of Path B7's headline findings (`ship+0xe8` is a ship name not a surname; `ship+0xec`'s field is a legitimate surname pointer, not a bug) and corrected `ship+0xf0`/`FUN_004035b0`'s ratio from "power-to-weight" to crew-based (§3.9). Done as a prerequisite to combat-damage work. First session named under the new descriptive-naming convention (see note above the table). |
 | `COMBAT_DAMAGE` (2026-09-26) | Phaser/Bank weapon-fire → hit → shield-absorb → hull/destruction chain, fully traced | `read_live_classdata.py` (extended, not rewritten — added reads for `class_data+0x380/+0x390/+0x3a0` and live `ship+0x110`) | Traced the entire phaser fire chain (`FUN_00403330`→`FUN_00408fa0`→`FUN_00408cf0`) including the damage formula (linear range falloff, no `4.0` despite decompiler pseudocode claiming otherwise — see `COMBAT_DAMAGE_MAP.md` §5), fully decoded shield absorption (directional facings, per-class capacity/efficiency from the TypeRecord table, a shield-bypassing "weapon type 1"), found and confirmed `Ship::vftable+0x34` = `FUN_00404d90` (damage application), and — via a live memory read — **overturned Begin 3 having any accumulating hull-HP pool**: every hull-penetrating hit is independently checked against a flat per-class destruction threshold. This closed `ENERGY_SYSTEM_MAP.md` §7 items 7 and 10 for good. Full writeup: `COMBAT_DAMAGE_MAP.md`. Torpedo/Tube path left for a future session. |
 | `TORPEDO_DAMAGE` (2026-09-26) | Torpedo/Tube fire chain traced through launch (projectile allocation); full live-tested lock/reload/fire model | `read_live_classdata.py` (extended — added `--watch` mode / `watch_tubes()`, and hardened it against the ship pointer going stale mid-watch) | Traced Tube's fire chain (`FUN_0040c0a0`→`FUN_0040beb0`→`FUN_0040bf70`) from raw disassembly, confirming torpedoes allocate a real projectile object (`FUN_0043d97e(0x118)`) rather than Bank's instant hit-scan — genuinely different mechanics, not "a near-twin of Bank" as an earlier session's power-draw note had implied. Then, via extensive live testing across two real play sessions (including one that ended in the player's ship being destroyed mid-test), fully confirmed the tube-state model: `ready(+0x30)` is a single-instant launch flag, `target(+0x6c)` is a standing lock from `"lock all tubes X"` that auto-reacquires after each ~20-28s reload cycle, and `field_34` is NOT firing-related at all (overturning a mid-session hypothesis) — a live-testing methodology parallel to `COMBAT_DAMAGE`'s `class_data+0x380` correction. Also disproved an "auto-fire" hypothesis for torpedoes via a clean zero-input control test. Full writeup: `TORPEDO_DAMAGE_MAP.md`. Projectile flight/collision/impact still completely untraced (`TORPEDO_DAMAGE_MAP.md` §5 item 5) — the natural next session. |
+| `TORPEDO_IMPACT` (2026-09-26) | Torpedo post-launch: global in-flight list, per-ship-per-turn hit resolution, live-confirmed immediate (non-deferred) damage | `read_live_classdata.py` (extended — added `--watch-combat` mode / `watch_combat()`; fixed a Shield-array container-layout bug and a process-exit crash found while building it) | Traced the projectile's self-registration into a global doubly-linked list via a virtual call through its own vtable (`Torp::vftable+0x20`→`FUN_00405980`), and the per-ship-per-turn function (`FUN_00406f10`) that walks that list rolling hit-chance/damage against each ship. That function's damage dispatch doesn't call the known `Ship::vftable+0x34` directly, which looked like deferred damage — **live testing across two real fights disproved that: damage lands the same turn as the hit, every time (6+ confirmed events)**. Also live-confirmed, unprompted: shield regen rate, multi-facing salvo hits, the lost-detection/stale-position mechanic (`COMBAT_DAMAGE_MAP.md` §3, previously only a static hypothesis), and — the session's other headline result — the derelict/crew-wipeout handler (`FUN_00403210`, previously just "presumed" in `COMBAT_DAMAGE_MAP.md` §6 item 9), matching the developer's own account of boarding and reactivating a crewless enemy ship. Full writeup: `TORPEDO_IMPACT_MAP.md`. |
 
 ---
 
@@ -206,6 +221,6 @@ Each script is a learning milestone. Keep them, improve them, learn from them.
 
 ---
 
-**Last Updated:** 2026-09-26 (`TORPEDO_DAMAGE` session)
+**Last Updated:** 2026-09-26 (`TORPEDO_IMPACT` session)
 **Maintained By:** Claude (AI Assistant)
 **For:** Begin 4 Project
