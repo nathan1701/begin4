@@ -9,9 +9,9 @@ import struct
 from typing import Dict, List, Tuple, Optional
 
 
-def analyze_pe_header(binary_path: str) -> Dict[str, int]:
+def analyze_pe_header(binary_path: str) -> Dict[str, any]:
     """
-    Read PE header information from a Windows executable.
+    Read PE header information from a Windows executable, including section table.
 
     Args:
         binary_path: Path to Begin.exe
@@ -44,30 +44,67 @@ def analyze_pe_header(binary_path: str) -> Dict[str, int]:
         f.seek(pe_offset + 28)
         image_base = struct.unpack('<I', f.read(4))[0]
 
+        # Read section headers (start after COFF and optional headers)
+        sections = []
+        section_offset = pe_offset + 24 + opt_header_size
+        for i in range(num_sections):
+            f.seek(section_offset + i * 40)
+            name = f.read(8).rstrip(b'\0').decode('ascii', errors='ignore')
+            virtual_size = struct.unpack('<I', f.read(4))[0]
+            virtual_addr = struct.unpack('<I', f.read(4))[0]
+            size_of_raw = struct.unpack('<I', f.read(4))[0]
+            ptr_to_raw = struct.unpack('<I', f.read(4))[0]
+
+            sections.append({
+                'name': name,
+                'virtual_size': virtual_size,
+                'virtual_addr': virtual_addr,
+                'size_of_raw': size_of_raw,
+                'ptr_to_raw': ptr_to_raw
+            })
+
         return {
             'image_base': image_base,
             'num_sections': num_sections,
             'machine': machine,
             'opt_header_size': opt_header_size,
-            'pe_offset': pe_offset
+            'pe_offset': pe_offset,
+            'sections': sections
         }
 
 
-def va_to_file_offset(va: int, binary_path: str) -> int:
+def va_to_file_offset(va: int, binary_path: str) -> Optional[int]:
     """
     Convert a Virtual Address (VA) in memory to a file offset in the binary.
+    Uses section headers to properly map RVA to file offset.
 
     Args:
         va: Virtual address (e.g., 0x00464688)
         binary_path: Path to Begin.exe
 
     Returns:
-        File offset for seeking in the binary
+        File offset for seeking in the binary, or None if VA is not in any section
     """
     header_info = analyze_pe_header(binary_path)
     image_base = header_info['image_base']
 
-    return va - image_base
+    # Convert VA to RVA (Relative Virtual Address)
+    rva = va - image_base
+
+    # Find which section contains this RVA
+    for section in header_info['sections']:
+        section_va = section['virtual_addr']
+        section_size = section['virtual_size']
+
+        if section_va <= rva < section_va + section_size:
+            # Calculate offset within section
+            offset_in_section = rva - section_va
+            # Map to file offset
+            file_offset = section['ptr_to_raw'] + offset_in_section
+            return file_offset
+
+    # Not found in any section
+    return None
 
 
 def read_constant_at_address(binary_path: str, va: int, size: int = 8) -> bytes:
@@ -81,8 +118,14 @@ def read_constant_at_address(binary_path: str, va: int, size: int = 8) -> bytes:
 
     Returns:
         Raw bytes at that address
+
+    Raises:
+        ValueError: If VA is not found in any section
     """
     file_offset = va_to_file_offset(va, binary_path)
+
+    if file_offset is None:
+        raise ValueError(f"Virtual address 0x{va:08x} not found in any PE section")
 
     with open(binary_path, 'rb') as f:
         f.seek(file_offset)
@@ -151,10 +194,19 @@ def analyze_wes_res_ratio(binary_path: str) -> Dict[str, any]:
     """
     Analyze the WES (Weapon Energy Storage) to RES (Reactor Energy Storage) ratio.
 
+    NOTE: Ghidra uses 0x00400000 as the base address, NOT the PE image_base.
+    This function assumes 0x00400000 as the Ghidra load address.
+
     Returns:
         Dictionary with analysis results
     """
     constants = search_energy_constants(binary_path)
+
+    # Find actual 4.0 constants in the binary
+    actual_4_0_addresses = {
+        '0x00464ad8': 'First 4.0 constant found in .rdata',
+        '0x00478798': 'Second 4.0 constant found in .data'
+    }
 
     analysis = {
         'wes_res_ratio': '4:1',
@@ -166,12 +218,15 @@ def analyze_wes_res_ratio(binary_path: str) -> Dict[str, any]:
             'meaning': 'Weapons/shields receive 4x the energy multiplier compared to reactor base output'
         },
         'critical_addresses': {
-            '0x00464688': 'Energy multiplier constant (4.0)',
+            '0x00464688': 'Address referenced in FMUL instructions (contains 100.0, not 4.0)',
+            '0x00464ad8': 'Actual 4.0 constant location (first instance)',
+            '0x00478798': 'Actual 4.0 constant location (second instance)',
             '0x0040f871': 'First FMUL instruction using constant',
             '0x0040f997': 'Second FMUL instruction using constant',
             '0x0040fc87': 'Third FMUL instruction using constant',
             '0x0040f4b0': 'Main display function (ship status, weaponry, power)'
-        }
+        },
+        'note': 'Path B3 investigation: The addresses in NEXT_SESSION_PROMPT may be slightly off. Need to verify actual constant usage.'
     }
 
     return analysis
