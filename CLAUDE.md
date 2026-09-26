@@ -31,3 +31,12 @@ Claude, when assisting with this project, you must strictly follow these pedagog
 3. **One Step at a Time:** Because this is my first project, break complex tasks (like setting up a compiler, or reading assembly code) into bite-sized, sequential steps. Wait for me to confirm I have finished a step before moving to the next.
 4. **Encourage Best Practices:** Remind me to commit my code to Git regularly. Prompt me to write clear variable names. Treat me like a junior developer you are training.
 5. **Check for Understanding:** Occasionally ask me if an explanation makes sense before proceeding.
+
+6. **Reuse and Improve Python Scripts:** All working Python scripts created during analysis must be:
+   - **Saved** to `/re_analysis/` with clear, descriptive names (e.g., `energy_system_analysis.py`, `binary_tools.py`)
+   - **Documented** with docstrings explaining what each function does and how to use it
+   - **Indexed** in a `PYTHON_TOOLS.md` manifest (see below) so they can be referenced in future sessions
+   - **NEVER rewritten** if a similar tool already exists—instead, improve the existing script or create a wrapper
+   - **Committed to Git** so they're version-controlled and available across sessions
+   
+   This prevents duplicating work and builds a reusable analysis toolkit for the project.
