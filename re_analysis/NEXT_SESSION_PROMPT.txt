@@ -1,0 +1,180 @@
+==================================================================================
+BEGIN 4 REVERSE ENGINEERING - PATH B3 NEXT SESSION PROMPT
+==================================================================================
+
+PROJECT: Begin 4 - Reverse engineer Begin 3 energy system, implement in Begin 4
+CURRENT PHASE: Path B3 - Energy System Deep Dive & Verification
+LAST ACHIEVEMENT: Path B2 - Located 4:1 WES:RES ratio constant at 0x00464688
+
+==================================================================================
+CRITICAL CONTEXT (COPY & PASTE THIS INTO NEXT SESSION)
+==================================================================================
+
+**What we found in Path B2:**
+The energy system of Begin3.exe relies on a constant at virtual address 0x00464688
+(in the .rdata section). This constant appears to be 4.0 and represents the 4:1
+ratio between Weapon Energy Storage (WES) and Reactor Energy Storage (RES).
+
+**Where it's used (3+ locations):**
+1. 0x0040f871 - FMUL double ptr [0x00464688]  (weapon energy calc)
+2. 0x0040f997 - FMUL double ptr [0x00464688]  (reactor energy calc)
+3. 0x0040fc87 - FMUL double ptr [0x00464688]  (shield power calc)
+
+All three are inside FUN_0040f4b0, the main ship status display function.
+
+**Related game text:**
+"Reinforced shields require 4x power" (0x004662f0) - confirms the 4:1 ratio is
+intentional game balance design.
+
+==================================================================================
+AVAILABLE RESOURCES & FILES
+==================================================================================
+
+PYTHON TOOLS (in /home/nathan/claude/begin4/re_analysis/):
+
+1. binary_tools.py - General binary analysis utilities
+   Functions:
+   - dump_ship_entry(binary_path, file_offset, size=256) - Extract ship struct data
+   - print_dump(entries, header="") - Pretty-print binary data
+   - compare_ship_entries(binary_path, ships) - Compare multiple entries
+   - find_value_in_binary(binary_path, value, show_context=True) - Search for values
+
+2. energy_system_analysis.py - NEW! Energy-specific analysis tools
+   Functions:
+   - analyze_pe_header(binary_path) - Read PE header info
+   - va_to_file_offset(va, binary_path) - Convert Ghidra VA to file offset
+   - read_constant_at_address(binary_path, va, size=8) - Read raw bytes at VA
+   - interpret_as_double(data) - Parse IEEE 754 double
+   - interpret_as_float(data) - Parse IEEE 754 float
+   - interpret_as_int32(data) - Parse 32-bit int
+   - search_energy_constants(binary_path) - Find WES:RES constant
+   - analyze_wes_res_ratio(binary_path) - Full energy analysis
+
+GHIDRA PROJECT:
+- Location: /home/nathan/claude/begin4/re_analysis/begin4-ghidra/begin3_project.gpr
+- Binary analyzed: /home/nathan/claude/begin4/original_game/Begin.exe
+
+DOCUMENTATION:
+- /home/nathan/claude/begin4/re_analysis/PATH_B3_HANDOFF.md - Path B3 checklist & goals
+- /home/nathan/claude/begin4/CLAUDE.md - Project overview & learning directives
+
+==================================================================================
+PATH B3 IMMEDIATE TASKS (PRIORITY ORDER)
+==================================================================================
+
+PHASE 1: VERIFY THE CONSTANT (15 min)
+[ ] 1. Run: python3 energy_system_analysis.py /home/nathan/claude/begin4/original_game/Begin.exe
+  [ ] Check if constant at 0x00464688 = 4.0
+  [ ] Document actual value if different
+  [ ] Verify PE header interpretation is correct
+
+PHASE 2: TRACE THE FMUL INSTRUCTIONS (30 min)
+[ ] 2. In Ghidra, navigate to 0x0040f871 (first FMUL)
+  [ ] Disassemble surrounding code (±20 instructions)
+  [ ] What value is in EAX/ECX before FMUL?
+  [ ] Where does the result go after FMUL?
+  [ ] Add comment: "Weapon energy calculation"
+
+[ ] 3. Navigate to 0x0040f997 (second FMUL)
+  [ ] Same analysis as above
+  [ ] Is this calculating something different?
+  [ ] Add comment documenting what this calculates
+
+[ ] 4. Navigate to 0x0040fc87 (third FMUL)
+  [ ] Same analysis as above
+  [ ] This one is near shield power - different purpose?
+  [ ] Add comment: Shield vs weapon power comparison
+
+PHASE 3: MAP DATA STRUCTURE (45 min)
+[ ] 5. In FUN_0040f4b0, identify all structure offsets:
+  [ ] Locate where weapon count/capacity is read
+  [ ] Locate where reactor output is read
+  [ ] Locate where shield capacity is read
+  [ ] Document as: "Ship structure offset 0xXX = [weapon/reactor/shield field]"
+
+[ ] 6. Find the display strings to understand field meanings:
+  [ ] "Reactor" string at 0x00466550 - used to display what?
+  [ ] "Weaponry" string at 0x00466508 - used to display what?
+  [ ] Trace backwards from these strings to find code that prints them
+
+PHASE 4: DOCUMENT FINDINGS
+[ ] 7. Create ENERGY_SYSTEM_MAP.md documenting:
+  - The 3 critical addresses and what they calculate
+  - Ship structure layout (all relevant offsets)
+  - The flow: reactor output → multiplied by 4.0 → weapon/shield power pool
+  - Any formulas you discover
+
+==================================================================================
+HOW TO USE THE PYTHON TOOLS
+==================================================================================
+
+Example 1: Verify the constant
+  python3 energy_system_analysis.py /home/nathan/claude/begin4/original_game/Begin.exe
+
+Example 2: Search for a specific value (e.g., weapon capacity)
+  python3 -c "
+  from binary_tools import find_value_in_binary
+  find_value_in_binary('/home/nathan/claude/begin4/original_game/Begin.exe', 100)
+  "
+
+Example 3: Dump ship entry at a known offset
+  python3 -c "
+  from binary_tools import dump_ship_entry, print_dump
+  entries = dump_ship_entry('/home/nathan/claude/begin4/original_game/Begin.exe', 0x12345)
+  print_dump(entries, 'Ship struct at 0x12345')
+  "
+
+==================================================================================
+GHIDRA NAVIGATION QUICK REFERENCE
+==================================================================================
+
+Function: FUN_0040f4b0 (Ship Status Display)
+  - Address bar: 0x0040f4b0 [ENTER]
+  - This is the main display function showing weapons, reactors, power
+
+Critical FMUL Instructions:
+  - 0x0040f871: FMUL double ptr [0x00464688]
+  - 0x0040f997: FMUL double ptr [0x00464688]
+  - 0x0040fc87: FMUL double ptr [0x00464688]
+
+Related Strings (for tracing backwards):
+  - "WEAPONRY:" at 0x00466508
+  - "Reactors" at 0x00466550
+  - "Reinforced shields require 4x power" at 0x004662f0
+
+==================================================================================
+QUESTIONS TO ANSWER IN PATH B3
+==================================================================================
+
+1. What is the exact value at 0x00464688? (Probably 4.0, but verify)
+2. Which weapon/reactor fields are being multiplied by 4.0?
+3. How does the game allocate the 4x power between weapons and shields?
+4. Are there other energy-related constants we need to find?
+5. Where is weapon/reactor capacity initialized? (table? config file? code?)
+
+==================================================================================
+SUCCESS CRITERIA FOR PATH B3
+==================================================================================
+
+✅ COMPLETE when you can answer:
+- "0x00464688 contains ___, which is used to calculate ___"
+- "The ship structure has weapon data at offset 0x___, reactor at 0x___, shield at 0x___"
+- "When reactor produces X energy, weapons can use up to 4X, shields use 4X, etc."
+- "The energy system works like this: [one clear paragraph explaining the flow]"
+
+==================================================================================
+TIPS FOR SUCCESS
+==================================================================================
+
+1. Screenshot Ghidra disassembly as you make discoveries (for documentation)
+2. Save notes in Ghidra comments (right-click instruction → Add Comment)
+3. The Python tools are reusable—if you find useful patterns, improve them!
+4. Each FMUL will likely multiply different input values (weapon vs reactor count)
+5. Remember: 4:1 ratio means the denominator is weapons, numerator is reactors
+
+==================================================================================
+END OF PROMPT
+==================================================================================
+
+Ready for Path B3! Open /home/nathan/claude/begin4/re_analysis/energy_system_analysis.py
+first and run it against Begin.exe. Let's verify that constant!
