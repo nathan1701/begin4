@@ -1,9 +1,9 @@
 # Begin 3 Energy System Map
 
-**Status:** Path B4 complete. This document supersedes the energy-system claims in
-`PATH_B3_FINDINGS.md` and `B3_PROGRESS.txt` (kept for historical record — see the banners
-added to those files). It also supersedes the "4:1 WES:RES ratio" framing in
-`docs/handoff-PATH-B2-energy-analysis.md`.
+**Status:** Path B5 complete (weapon power draw traced, `FUN_0040b510` identified). This document
+supersedes the energy-system claims in `PATH_B3_FINDINGS.md` and `B3_PROGRESS.txt` (kept for
+historical record — see the banners added to those files). It also supersedes the "4:1 WES:RES
+ratio" framing in `docs/handoff-PATH-B2-energy-analysis.md`.
 
 **Binary:** `original_game/Begin.exe` — **Date:** 2026-09-26 — **Tooling:** Ghidra (live MCP
 connection), `energy_system_analysis.py`
@@ -23,15 +23,16 @@ binary:
    by the compiler's constant pool for at least two distinct, real game-balance rules (Drive
    charge/drain rate; Shield reinforcement-tier power cost) **and** several unrelated formulas
    (a collision-detection quadratic, a UI threshold, a physics coefficient).
-3. **Weapons** (Phaser Banks / Torpedo Tubes / Probe Launchers — the actual "WES" side of the
-   manual's ratio) have **not been shown to use the 4.0 constant at all**. Their power-draw
-   functions haven't been traced yet (see Open Questions).
+3. **Weapons** (Phaser Banks, confirmed Path B5 — see §3.3b) **do not use the 4.0 constant, or
+   any reactor-relative ratio, at all.** Their cost is a flat reactor-rate deduction plus a
+   separate type-specific per-tick charge cap. This was the last open piece of the "WES:RES"
+   hypothesis, and it does not hold up.
 
 The line in the manual/game text — *"Reinforced shields require 4x power"* (`0x004662f0`) — is
 not a metaphor for a weapon/reactor exchange rate. It's a literal description of one confirmed
 mechanism: **reinforced shields cost 4× the power of regular shields**, implemented in
-`FUN_0040b320` (§3.2 below). Whether an analogous 4:1 relationship exists for weapons is still
-open.
+`FUN_0040b320` (§3.2 below). **Path B5 confirmed no analogous relationship exists for weapons** —
+see §3.3b.
 
 ---
 
@@ -184,6 +185,105 @@ type-weighted sum.
 **Weapons** (Phaser Banks / Torpedo Tubes / Probe Launchers) — not yet traced. Their
 power-draw functions are unknown at time of writing. See Open Questions.
 
+### 3.3b Weapon (Bank) power draw — resolved in Path B5
+
+Traced `"Charging %d bank%s!\n"` (`0x00467b64`) all the way to the real per-unit energy function.
+Two things worth flagging about *how* this was found: neither the UI-command function
+(`0x00412bb0`) nor the state-setter it calls (`0x00408b80`) had a Ghidra-defined function at their
+address, even though `0x00408b80` is a direct `call` target — Ghidra's auto-analysis simply never
+reached this region. Both were decoded by hand from raw bytes (see `binary_tools.py` /
+`energy_system_analysis.py`'s `file_offset_to_va()`, added this session as the inverse of
+`va_to_file_offset()`).
+
+**The command chain** (`Bank::ChargeCommand` at `0x00412bb0`, called when the player issues the
+charge command): parses which banks were selected, then calls a shared state-setter
+(`Bank::MarkUnitsState`, `0x00408b80`) with a numeric code (`7` = charge) that just writes that
+code into each selected unit's `+0x28` state byte — after checking the unit is available and not
+already maxed. `"Charging %d bank%s!\n"` prints when that returns 0 failures. **None of this is
+energy math** — it's a UI acknowledgment that a state flag got set.
+
+**The real energy draw** is per-frame, exactly parallel to Drive/Shield/Cloak, called from
+`FUN_00404250` on `ship+0x438` (confirming this as the Bank slot):
+
+```c
+// FUN_004087b0 - called once per bank unit, per frame, from FUN_00408b40 (array driver)
+// this = one Bank unit; pool = shared per-frame accumulator (local_88 in FUN_00404250)
+if (unit.state != 8 && unit.linkRec[0] > 0 &&
+    unit.currentLevel <= unit.linkRec->max && unit.flag_0x30 == 0)
+{
+    double reactorRate = /* chased via unit+0x20 -> +0x14 -> +0x28 */;
+    pool -= reactorRate;
+
+    if (pool >= 0.0) {
+        TypeRec *t = unit.typeRecord;                          // +0x24
+        double remaining = t->maxCharge - unit.accumulated;    // +0x38 - +0x40
+        if (remaining <= 0.0) { unit.ready = 1; return 1; }    // already fully charged
+        double perTickCap = t->maxCharge / t->chargeRate;      // +0x38 / +0x30
+        if (perTickCap < remaining) remaining = perTickCap + 0.001;  // 0x00465440 epsilon
+        unit.accumulated += min(remaining, pool);
+        pool -= remaining;
+        unit.ready = 1;
+    } else {
+        unit.ready = 0;
+        unit.accumulated = 0.0;   // reactor undersupplied -> charge progress resets to ZERO
+    }
+}
+```
+
+**No `0x00464ad8` (4.0), no `0x00478798`, no ratio at all.** Weapon power cost is a flat
+reactor-rate deduction plus a *separate*, type-specific per-tick charge cap (`maxCharge /
+chargeRate`) — nothing scales relative to the reactor the way Drive and Shield do. Bank's failure
+mode is also harsher than Drive/Shield's: if the reactor can't even cover its own rate for a
+single tick, the bank's accumulated charge progress is wiped to zero rather than just pausing.
+
+**Conclusion: there was never a real "WES:RES 4:1" mechanic.** The manual's "4x power" line was
+always Shield-specific, exactly as suspected. This closes Open Question #1 from Path B4.
+
+One loose thread for a future session: the reactor-rate chase here (`unit+0x20 → +0x14 → +0x28`)
+uses a different offset path than Drive/Shield's (`ship+0xe8/0xec → +0x38`) — worth keeping in
+mind for Open Question about `ship+0xec`'s identity (§7).
+
+### 3.5 `FUN_0040b510` — NOT an energy function (resolved in Path B5)
+
+Path B4 flagged `FUN_0040b510` as suspicious because it uses both the 4.0 and 0.5 constants in a
+Drive-like phase-cycle shape. Path B5 traced its three callers (`FUN_00409530`, `FUN_0040a630`,
+`FUN_0040b740` — all thin per-unit wrappers differing only in which offset holds a "link" pointer)
+up one more level, to a single shared driver: `FUN_004035b0`.
+
+**`FUN_004035b0` is a completely separate per-frame system from `FUN_00404250`'s reactor pool.**
+It computes a ship-wide "power-to-weight ratio":
+
+```c
+void FUN_004035b0(Ship *ship) {
+    double ratio = ship->cachedReactorOutput(+0xf0) / ship->classData->deadWeightTonnage(+0x18);
+    if (ship->linkedShip(+0x148) != NULL) {
+        double linkedRatio = linkedShip->cachedReactorOutput(+0xf0)
+                            / linkedShip->classData->deadWeightTonnage(+0x18) * linkedShip->+0x390;
+        ratio = max(ratio, linkedRatio);
+    }
+    if (ratio <= 0.1 /* 0x00464b08 */) return;    // "brownout" floor - skip the whole pass
+
+    // roll + report a phase-cycle event for 13 subsystem slots; only 5 of them route through
+    // FUN_0040b510: ship+0xb50, Tractor(+0xb88), +0xbb8, +0xbf0, Cloak(+0xc20)
+    ...
+}
+```
+
+`class+0x18` is documented in `PATH-B-FINDINGS.md` as **Dead Weight Tonnage**, and
+`FUN_004035b0` is independently flagged there as referencing the string `"reactor"` — both support
+reading `ship+0xf0` as a cached total reactor-output value (its writer wasn't tracked down this
+session — open thread). `FUN_0040b510` itself is a generic phase/percent-chance cycle (reusing
+`FUN_004013e0`'s percent-roll helper, same as Drive), and its results are reported through
+`FUN_004182e0`, a generic `"%d %s%s %s!\n"` notifier gated on "is this the player's own ship."
+
+**This is a probabilistic subsystem-malfunction/event system, not an energy drain.** It reuses the
+same 4.0 and 0.5 literals as Drive/Shield purely coincidentally — the same "narrow xref count
+doesn't guarantee purpose-built" lesson from §8, now confirmed a second time. It also reclassifies
+`ship+0xb50`, `+0xbb8`, and `+0xbf0`: they're not Drive/Shield/Bank-style continuous chargers:
+they belong to this probabilistic-event family alongside Tractor and Cloak (which each *also* have
+their own, separate, real continuous energy-draw functions from `FUN_00404250` — this is purely an
+*additional* system layered on top).
+
 ---
 
 ## 4. Full constant catalogue (all values read directly from the binary, VA→file-offset fixed for Ghidra's `0x00400000` base)
@@ -222,8 +322,14 @@ header's own declared (and irrelevant) `0x00062e00` image base.
 | `FUN_0040b320` (`0x0040b320`) | Shield power-budget summation | The literal 4× reinforced-shield weighting |
 | `FUN_0040aea0` (`0x0040aea0`) | Shield::ChargeCycle (per-unit) | Uses generic 100.0, no 4.0 |
 | `FUN_0040a690` (`0x0040a690`) | Cloak::UpdatePower | §3.3, flat-cost formula, operates on `+0xc20` |
-| `FUN_0040b510` (`0x0040b510`) | **Unidentified** | Charge-cycle-shaped; uses both 4.0 and 0.5. Callers: `FUN_00409530`, `FUN_0040a630`, `FUN_0040b740`. Not yet tied to a named subsystem. |
 | `FUN_004018b0` (`0x004018b0`) | Collision detection | Quadratic-formula intersection test; incidental 4.0 use only |
+| `FUN_00412bb0` (`0x00412bb0`) | Bank::ChargeCommand | §3.3b. UI command handler, not energy math. **Not in Ghidra's function database** — hand-decoded from raw bytes; Ghidra's auto-analysis never reached this region. |
+| `FUN_00408b80` (`0x00408b80`) | Bank::MarkUnitsState | §3.3b. Sets a per-unit state byte from a numeric command code. **Also not in Ghidra's function database**, despite being a direct `call` target. |
+| `FUN_00408b40` (`0x00408b40`) | Bank::UpdateArray (per-frame driver) | §3.3b. Iterates `ship+0x438`'s unit array, calls `FUN_004087b0` per slot. Ghidra has this one defined normally. |
+| `FUN_004087b0` (`0x004087b0`) | Bank::ChargeCycle (per-unit) | §3.3b. The real weapon energy-draw function. No 4.0, no ratio. |
+| `FUN_004035b0` (`0x004035b0`) | Ship-wide power-to-weight ratio + malfunction-event driver | §3.5. Separate per-frame system from `FUN_00404250`. Already flagged (but not analyzed) in `PATH-B-FINDINGS.md` as "Energy Processing." |
+| `FUN_0040b510` (`0x0040b510`) | Subsystem malfunction/event phase-cycle | §3.5. Uses 4.0 and 0.5, but NOT energy-related — driven by `FUN_004035b0`'s power-to-weight ratio, not the reactor pool. Callers: `FUN_00409530` (`+0xb88` Tractor, `+0xbf0`), `FUN_0040a630` (`+0xc20` Cloak), `FUN_0040b740` (`+0xb50`, `+0xbb8`). |
+| `FUN_004182e0` (`0x004182e0`) | Generic malfunction/event notifier | §3.5. `"%d %s%s %s!\n"`, gated on `this ship == player's own ship`. |
 
 ---
 
@@ -240,28 +346,53 @@ for the RVA conversion instead of the header's field. See `PYTHON_TOOLS.md` for 
 
 ---
 
-## 7. Open questions for Path B5
+## 7. Open questions
 
-1. **Trace actual weapon power-draw.** Start from `"Charging %d bank%s!\n"` (`0x467b64`) or the
-   `"BANK STATUS:\n"` (`0x004674d4`) screen and work backward to find Bank/Tube/Launcher's own
-   `UpdatePower`-equivalent function(s). Does the 4.0 constant (or a different ratio) show up
-   there? This is the one piece that would actually validate or refute a literal "WES:RES"
-   pairing.
-2. **Identify `FUN_0040b510`.** Structurally a charge-cycle function (uses 4.0 *and* 0.5, the
-   same pairing as Drive), called from `FUN_00409530` / `FUN_0040a630` / `FUN_0040b740` — none
-   of which have been decompiled yet. Likely Tractor Beam or another un-named subsystem.
+**Closed in Path B5:**
+
+1. ~~Trace actual weapon power-draw.~~ **Done — §3.3b.** No 4.0, no ratio; flat reactor-rate
+   deduction + type-specific per-tick charge cap. The "WES:RES 4:1" hypothesis does not hold for
+   weapons, closing this out for good.
+2. ~~Identify `FUN_0040b510`.~~ **Done — §3.5.** Not an energy function at all — a
+   subsystem-malfunction/event system driven by a ship-wide power-to-weight ratio
+   (`FUN_004035b0`), coincidentally reusing the 4.0/0.5 literals.
+
+**Still open for Path B6:**
+
 3. **Resolve the second `4.0` at `0x00478798`.** No direct-addressing xrefs were found; it's
    probably reached through computed/indexed addressing (an array of doubles, accessed via a
    register-relative index) rather than a literal `FMUL [addr]`. Would need a broader
    instruction-pattern search, or finding the array's base and stride.
 4. **Confirm `ship+0xec`'s identity.** `FUN_00418080` constructs it; several charge functions
    chase a pointer near this offset to reach a reactor-rate double at `+0x38` in whatever it
-   points to. Is `0xec` itself the Reactor link, or a distinct "power distribution" object?
+   points to. Is `0xec` itself the Reactor link, or a distinct "power distribution" object? Path
+   B5 adds a wrinkle: Bank's charge function (§3.3b) reaches its own reactor-rate double via a
+   *different* chase (`unit+0x20 → +0x14 → +0x28`) — is this the same underlying Reactor object
+   reached a different way, or a genuinely separate link?
 5. **Explain how the Display/Summary struct (§2.2) gets built.** It is clearly assembled fresh
    for `FUN_0040f4b0` and does not share the Runtime Object's field layout. Finding its
    construction site would let us map it back to Runtime Object offsets directly, rather than
    via string-format inference.
-6. **Decode the three still-unnamed adjacent constants** (`0x464ad0`, `0x464ac8`, `0x464b08`).
+6. **Decode the two still-open adjacent constants** (`0x464ad0`, `0x464ac8`) — values are known
+   (`1e-08`, `1.0`) but their functional role within `FUN_004018b0`/`FUN_00407220` isn't confirmed.
+7. **New from Path B5 — confirm `ship+0xf0`.** Used in `FUN_004035b0` as a "cached reactor output"
+   value (divided by class-data Dead Weight Tonnage at `+0x18` to get a power-to-weight ratio).
+   Strongly implied by the `"reactor"` string xref already noted in `PATH-B-FINDINGS.md` for this
+   same function, but its *writer* wasn't tracked down this session.
+8. **New from Path B5 — what event does `FUN_0040b510`'s cycle actually represent?** We know
+   *that* it fires a generic `"%d %s%s %s!\n"` notification (via `FUN_004182e0`) for 5 subsystem
+   slots (`+0xb50`, Tractor `+0xb88`, `+0xbb8`, `+0xbf0`, Cloak `+0xc20`) when a power-to-weight
+   floor is cleared, but not the specific noun/verb substituted in (would need to trace
+   `FUN_00401490`/`FUN_00401560`, the two calls made just before the notify, which likely set
+   global "current message" state).
+9. **New from Path B5 — name the remaining unlabeled subsystem slots.** `+0xb50`, `+0xbb8`,
+   `+0xbf0`, `+0x2a0`, `+0x454`, `+0x470`, `+0x9c0`, `+0xc00` still have no confirmed subsystem
+   name (Torpedo Tube / Probe Launcher / Battery / Scanner / etc. remain candidates). The RTTI
+   class-name strings found this session (`.?AVTube@@`, `.?AVLauncher@@`, `.?AVBattery@@`,
+   `.?AVScanner@@`, `.?AVLifeSupport@@`, `.?AVTransporter@@`, `.?AVImpulse@@` at `0x0048b3xx`-
+   `0x0048b5xx`) are a promising new lead — each RTTI type-descriptor string is likely referenced
+   from that class's vtable, which would let these slots be matched to concrete class names rather
+   than guessed from position.
 
 ---
 
@@ -286,3 +417,21 @@ for the RVA conversion instead of the header's field. See `PYTHON_TOOLS.md` for 
 - **Matching offsets across two functions doesn't mean matching structs.** This binary has (at
   least) three differently-shaped "ship" structures. Confirm structural identity via
   size/allocator/label, not just "this offset looks similar to that one."
+- **Zero xrefs to a string doesn't mean it's unreachable — it might mean Ghidra never analyzed the
+  code that reaches it.** (Path B5.) `"Charging %d bank%s!\n"` had zero xrefs not because it lives
+  in an indexed table (the working theory going in, by analogy with `0x00478798`), but because the
+  `push offset str` instruction referencing it sits in a region Ghidra's auto-analysis never
+  disassembled into a function at all — confirmed by finding the raw pointer via a byte-level
+  search (`find_value_in_binary` + the new `file_offset_to_va()`) and discovering it decoded to a
+  perfectly ordinary `push`/`call` pair. Even a direct `call` target (`0x00408b80`) can be missing
+  from Ghidra's function database. When `get_function_by_address` / `decompile_function_by_address`
+  both say "no function found," that's a statement about Ghidra's analysis coverage, not about
+  whether real code exists there — check with a raw byte dump before concluding a dead end.
+- **A charge-cycle-shaped function isn't automatically part of the energy system.** `FUN_0040b510`
+  looked exactly like Drive's charge cycle (phase counter, percent-chance roll, 4.0 and 0.5
+  literals) and was a reasonable person's first guess for a missing weapon subsystem. It turned out
+  to belong to an entirely different mechanic (ship-wide power-to-weight-driven malfunction events)
+  that just happens to share the same *shape* and the same *constants* as the real energy system.
+  Structural similarity is a lead worth chasing, not a conclusion — the only thing that confirms
+  "this is energy math" is whether the value being consumed is actually the shared reactor pool
+  (`local_88` from `FUN_00404250`), which `FUN_0040b510` never touches.

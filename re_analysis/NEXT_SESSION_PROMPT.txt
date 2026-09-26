@@ -1,140 +1,148 @@
 ==================================================================================
-BEGIN 4 REVERSE ENGINEERING - PATH B5 NEXT SESSION PROMPT
+BEGIN 4 REVERSE ENGINEERING - PATH B6 NEXT SESSION PROMPT
 ==================================================================================
 
 PROJECT: Begin 4 - Reverse engineer Begin 3 energy system, implement in Begin 4
-CURRENT PHASE: Path B5 - Weapon Energy & Remaining Open Questions
-LAST ACHIEVEMENT: Path B4 - Energy system fully mapped for Drive, Shield, and Cloak;
-                   corrected all of Path B3's field mis-identifications; wrote
-                   ENERGY_SYSTEM_MAP.md as the canonical reference.
+CURRENT PHASE: Path B6 - Remaining energy-system loose ends + subsystem naming
+LAST ACHIEVEMENT: Path B5 - Traced weapon (Bank) power draw to its real per-unit energy
+                   function (no 4.0, no ratio - closes the "WES:RES 4:1" question for good).
+                   Identified FUN_0040b510 as an unrelated subsystem-malfunction/event system,
+                   not part of the energy pool. Hand-disassembled two functions Ghidra's
+                   auto-analysis had never reached. Updated ENERGY_SYSTEM_MAP.md, added
+                   file_offset_to_va() to energy_system_analysis.py.
 
 ==================================================================================
 READ THIS FIRST
 ==================================================================================
 
 Before anything else, read:
-1. re_analysis/ENERGY_SYSTEM_MAP.md - the complete, corrected picture. Contains the full
-   structure maps, both confirmed "4x" mechanisms, the constant catalogue, and section 7
-   ("Open questions for Path B5"), which this file expands into concrete tasks.
-2. re_analysis/PYTHON_TOOLS.md - tool manifest, including a bug fix to
-   energy_system_analysis.py you should know about before using it (VA-to-file-offset
-   was using the wrong image base; now fixed).
+1. re_analysis/ENERGY_SYSTEM_MAP.md - the complete, corrected picture. Sections 3.3b and 3.5
+   are new this session (weapon power draw, and the FUN_0040b510 resolution). Section 7
+   ("Open questions") has been re-split into "Closed in Path B5" and "Still open for Path B6" -
+   the still-open list (items 3-9) is exactly what this file expands into concrete tasks below.
+2. re_analysis/PYTHON_TOOLS.md - tool manifest. Read the new "Path B5 workflow" note under
+   energy_system_analysis.py before touching any string/constant that shows zero xrefs - it's
+   not always an indexed table; sometimes Ghidra just never analyzed that code as a function.
 
 Do NOT re-trust re_analysis/PATH_B3_FINDINGS.md or B3_PROGRESS.txt for factual claims about
-the energy system - both are marked superseded and kept only as historical record of how
-the investigation unfolded (useful for the "how we got here" story, not for facts).
+the energy system - both are marked superseded and kept only as historical record.
 
 ==================================================================================
-CRITICAL CONTEXT - WHAT PATH B4 ESTABLISHED
+CRITICAL CONTEXT - WHAT PATH B5 ESTABLISHED
 ==================================================================================
 
-There is NO single "4:1 WES:RES ratio" constant. Two separate, real energy-balance rules
-both happen to reuse the same 4.0 literal (0x00464ad8):
+The "WES:RES 4:1" hypothesis is now fully closed, in both directions:
+1. DRIVE and SHIELD both use the real 4.0 literal (0x00464ad8) for two separate, real
+   game-balance rules (Path B4).
+2. WEAPONS (Bank, confirmed Path B5 via FUN_004087b0) use NEITHER 4.0 NOR any reactor-relative
+   ratio at all. Cost = flat reactor-rate deduction + a separate type-specific per-tick charge
+   cap (maxCharge/chargeRate, epsilon-clamped at 0x00465440=0.001). If the reactor can't cover
+   its own rate for a tick, Bank's accumulated charge resets to ZERO - a harsher failure mode
+   than Drive/Shield.
+3. FUN_0040b510 (flagged in Path B4 as charge-cycle-shaped, using both 4.0 and 0.5) turned out
+   to be a COMPLETELY SEPARATE system: a ship-wide "power-to-weight ratio" (reactor output /
+   class Dead Weight Tonnage, computed in FUN_004035b0) driving probabilistic malfunction/event
+   rolls for 5 subsystem slots (+0xb50, Tractor +0xb88, +0xbb8, +0xbf0, Cloak +0xc20). It
+   coincidentally reuses the same 4.0/0.5 literals as the real energy system but never touches
+   the reactor pool (local_88 from FUN_00404250). Don't confuse the two systems again.
 
-1. DRIVE charges and drains at reactor_rate x 4.0 (FUN_00409740, ship+0x708 array,
-   0x38-byte records)
-2. SHIELD reinforcement costs 4x the power of a regular shield (FUN_0040b320, ship+0x7f8
-   array, 0x48-byte records) - this is the literal "Reinforced shields require 4x power"
-   mechanism from the manual/game text
-
-CLOAK (FUN_0040a690, ship+0xc20) uses neither pattern - flat crew-count-based cost, no 4.0.
-
-WEAPONS (Phaser Banks / Torpedo Tubes / Probe Launchers) have not been traced at all.
-This is the single biggest gap - the manual's "WES" (Weapon Energy Storage) side of the
-ratio has never actually been examined in code. Priority 1 below.
-
-The generic constant 0x00464688 = 100.0 is NOT energy-related. It's a percent-to-fraction
-helper used in 35+ unrelated functions across the whole codebase. Don't chase it further -
-it's a solved, closed question (see ENERGY_SYSTEM_MAP.md section 4).
+Two functions this session (FUN_00412bb0 "Bank::ChargeCommand" and FUN_00408b80
+"Bank::MarkUnitsState") were NOT in Ghidra's function database at all, despite being real code
+- one of them a direct CALL target. Both were hand-disassembled from raw bytes. If you hit
+"no function found at or containing address" from Ghidra on a region you have independent
+evidence contains real code (e.g. a raw-byte pointer search hit), don't assume it's unreachable
+- dump the bytes and decode by hand, or ask the user to create the function in the Ghidra GUI
+(right-click -> Disassemble, then Create Function) so future MCP calls can reach it normally.
 
 ==================================================================================
 GHIDRA CONNECTION
 ==================================================================================
 
-A live Ghidra MCP connection (tools named mcp__ghidra__*) is available and was the key tool
-in Path B4 - direct decompile/disassemble/xref queries, not manual byte-searching. Confirm
-it's connected at the start of the session (e.g. mcp__ghidra__get_current_function or a
-get_xrefs_to call on a known address). If it's not available, the Python tools
-(binary_tools.py, energy_system_analysis.py) still work for static analysis but xref-based
-tracing (which is how most of Path B4's findings were made) won't be possible.
+A live Ghidra MCP connection (tools named mcp__ghidra__*) was used throughout Path B5 -
+decompile/disassemble/xref queries plus RTTI/class-name exploration via list_strings and
+list_classes. Confirm it's connected at the start of the session. New tools used this session
+beyond the Path B4 set: list_classes (lists all C++ namespaces Ghidra has recovered, including
+per-subsystem RTTI class names), search_functions_by_name, list_methods, list_namespaces.
 
-Useful Ghidra tools from this session: decompile_function_by_address, disassemble_function,
-get_xrefs_to, get_function_by_address, list_strings (with a `filter` argument - very useful
-for finding a subsystem's format strings, e.g. filter="Phaser" or filter="Bank").
+Also new this session: Path B4's Python-tool workflow for hand-verifying a "zero xrefs" string
+or constant - see PYTHON_TOOLS.md's "Path B5 workflow" note. Keep this in your back pocket for
+any future "why does this have no xrefs" moment.
 
 ==================================================================================
-PATH B5 TASKS (PRIORITY ORDER)
+PATH B6 TASKS (PRIORITY ORDER)
 ==================================================================================
 
-PRIORITY 1: Trace actual weapon power draw (60 min)
-[ ] Find the Bank/Tube/Launcher equivalent of Shield's FUN_0040b4a0 / FUN_0040b320 pair,
-    or Cloak's FUN_0040a690.
-[ ] Starting points:
-    - list_strings filter="Charging" -> "Charging %d bank%s!\n" (0x467b64) - trace backwards
-      from its xref to find the function that actually applies a charge/energy cost when
-      firing a bank
-    - list_strings filter="BANK STATUS" (0x004674d4) - the bank status screen, likely reads
-      the same per-bank energy fields a power-draw function would use
-    - FUN_00404250 (the per-frame subsystem update driver) does NOT appear to call a
-      Bank/Tube/Launcher update in the same pattern as Drive/Shield/Cloak - re-check its
-      full disassembly (not just the decompiled C, which may hide indirect/vtable calls)
-      for a call you haven't decompiled yet, or check if weapon energy is deducted at
-      fire-time only (event-driven) rather than per-frame (continuous, like Drive/Shield/Cloak)
-[ ] Once found: does it use 0x00464ad8 (4.0) at all? A different constant? No ratio at all
-    (i.e. weapons just draw a fixed cost per shot with no reactor-relative scaling)?
-[ ] This directly answers whether "WES:RES 4:1" ever existed as a real unified mechanic, or
-    was always a mis-generalization from the Shield-specific "4x power" text.
+PRIORITY 1: Name the remaining subsystem slots via RTTI (45 min)
+[ ] Path B5 found full C++ RTTI type-descriptor strings for every subsystem class:
+    .?AVBank@@ (0x0048b438), .?AVBattery@@ (0x0048b44c), .?AVCloak@@ (0x0048b464),
+    .?AVDrive@@ (0x0048b478), .?AVImpulse@@ (0x0048b48c), .?AVLauncher@@ (0x0048b4a4),
+    .?AVLifeSupport@@ (0x0048b4c0), .?AVReactor@@ (0x0048b4dc), .?AVScanner@@ (0x0048b4f4),
+    .?AVShield@@ (0x0048b50c), .?AVTractor@@ (0x0048b5e0), .?AVTransporter@@ (0x0048b5f8),
+    .?AVTube@@ (0x0048b614), .?AVSystem@@ (0x0048b420, likely the shared base class),
+    .?AVShip@@ (0x0048b370), .?AVObject@@ (0x0048b328).
+[ ] These are the "name" field inside each class's RTTI TypeDescriptor object (the descriptor
+    itself starts ~8 bytes earlier, at name_addr - 8, per standard MSVC RTTI layout: vtable ptr +
+    spare + name). get_xrefs_to found ZERO hits on the raw name-string address directly for the
+    ones tried in Path B5 (this is the SAME "reference not visible to Ghidra's xref engine"
+    pattern as the Bank UI-command functions) - the TypeDescriptor is referenced from each
+    class's "RTTI Complete Object Locator" struct, which sits right before the vtable
+    (vtable[-1]). Try get_xrefs_to on (name_addr - 8) instead of the name string itself; if that
+    also comes up empty, fall back to the raw-byte-search technique (find_value_in_binary on the
+    TypeDescriptor's address, find_offset_to_va) to locate the Locator struct, then the vtable
+    right after it, then decompile methods pointed to by the vtable.
+[ ] Goal: match .?AVTube@@, .?AVLauncher@@, .?AVBattery@@, .?AVScanner@@, .?AVLifeSupport@@,
+    .?AVTransporter@@, .?AVImpulse@@ to concrete ship+offset slots (+0xb50, +0xbb8, +0xbf0,
+    +0x2a0, +0x454, +0x470, +0x9c0, +0xc00 are still unnamed - there are 8 unnamed slots and 7
+    unnamed RTTI classes, so one slot is probably NOT a per-instance subsystem, or one RTTI class
+    has zero live instances on ships).
 
-PRIORITY 2: Identify FUN_0040b510 (30 min)
-[ ] Structurally shaped like a charge-cycle function (phase counter, accumulator, uses BOTH
-    the 4.0 and 0.5 constants - the same pairing Drive uses).
-[ ] Called from three places, none decompiled yet: FUN_00409530, FUN_0040a630, FUN_0040b740
-    (FUN_0040b740 is a thin wrapper already decompiled in this session's transcript - see
-    ENERGY_SYSTEM_MAP.md function table - but its OWN caller hasn't been traced)
-[ ] Decompile all three callers and look for a notify-string (like Drive's "Drive" literal)
-    or a recognizable ship-offset match against PATH-B-FINDINGS.md's runtime object table
-    (candidates: Tractor Beam at ~0xb88, or one of the unnamed slots at 0x2a0/0x438/0x454/
-    0x470/0x9c0/0xc00/0xbf0)
+PRIORITY 2: Resolve the second 4.0 at 0x00478798 (30 min)
+[ ] Unchanged from Path B4/B5 - still zero direct-addressing xrefs. find_double_in_binary()
+    with section_filter='.data' to see its neighbors; check if 1.325817659497261 and
+    1.3276424705982208 (noted adjacent in PATH_B3_FINDINGS.md) match any per-ship-class stat.
+[ ] New idea from Path B5's RTTI discovery: check whether this address sits near any of the
+    RTTI-related data structures (TypeDescriptors, Locators, vtables) rather than a gameplay
+    stat table - the two investigations happened to surface data in similar-looking regions of
+    .data this session; worth ruling in or out early.
 
-PRIORITY 3: Resolve the second 4.0 literal at 0x00478798 (30 min)
-[ ] get_xrefs_to found ZERO direct hits on this address - meaning it's not referenced by a
-    literal `FMUL double ptr [0x00478798]` anywhere. It's likely part of an array accessed
-    via a computed/indexed address (base + index*8), which Ghidra can't resolve to a fixed
-    xref automatically.
-[ ] Approach: find_double_in_binary() in energy_system_analysis.py can locate every 4.0 in
-    the binary - use section_filter='.data' and look at what's immediately before/after
-    0x00478798 in that scan to see if it's part of a recognizable table (PATH_B3_FINDINGS.md
-    already noted neighboring values 1.325817659497261 and 1.3276424705982208 - do those
-    numbers mean anything? Check if they match any per-ship-class stat from
-    ship-struct-analysis.md or all-ships-from-manual.md)
-[ ] Alternative: search for LEA/array-indexing instructions near functions that already use
-    the OTHER 4.0 (0x00464ad8) - the two may be part of the same logical table split across
-    sections by the compiler/linker, or may be genuinely unrelated
+PRIORITY 3: Confirm ship+0xec's identity, and reconcile the two reactor-rate chase paths (30 min)
+[ ] FUN_00418080 constructs ship+0xec (per PATH-B-FINDINGS.md). Decompile it directly.
+[ ] Path B5 found Bank's per-unit charge function reaches ITS reactor-rate double via a
+    DIFFERENT chase than Drive/Shield: unit+0x20 -> +0x14 -> +0x28, vs. ship+0xe8/0xec -> +0x38.
+    Trace both chases far enough to determine if they land on the SAME underlying Reactor
+    object (just reached via different intermediate links per subsystem type) or genuinely
+    different objects. This would settle whether ship+0xec is THE Reactor link or something else.
 
-PRIORITY 4: Confirm ship+0xec's identity (20 min)
-[ ] FUN_00418080 constructs it (per PATH-B-FINDINGS.md). Several charge functions this
-    session chased a pointer near this offset (+0xe8 from a subsystem's own back-pointer)
-    to reach a reactor-rate double at +0x38 in whatever it points to.
-[ ] Decompile FUN_00418080 directly to see what it initializes and how large it is - this
-    should settle whether 0xec is the Reactor subsystem itself (despite PATH-B-FINDINGS.md
-    assigning Reactor to 0x150) or a separate "power distribution" link object.
+PRIORITY 4: Confirm ship+0xf0 (new from Path B5) (20 min)
+[ ] Used in FUN_004035b0 as a "cached reactor output" total (divided by class+0x18 Dead Weight
+    Tonnage to get a power-to-weight ratio). PATH-B-FINDINGS.md already flags FUN_004035b0 as
+    referencing the string "reactor" (0x00464c3c), which supports this reading, but nothing
+    writes to ship+0xf0 was found this session. Find the writer - likely inside or near
+    FUN_0040a9a0 (Reactor's per-unit output summation) or its caller in FUN_00404250.
 
-PRIORITY 5 (if time remains): Reconcile the Display struct's construction (30 min)
-[ ] Find where FUN_0040f4b0's display struct (ENERGY_SYSTEM_MAP.md section 2.2) actually
-    gets built each frame/call - it's clearly a flattened snapshot, not the raw runtime
-    object. Finding its constructor would let every one of its offsets be mapped directly
-    back to a Runtime Object offset, removing the need for string-based inference.
+PRIORITY 5 (if time remains): Explain how the Display struct (ENERGY_SYSTEM_MAP.md section 2.2)
+gets built (30 min)
+[ ] Unchanged from Path B4. Find where FUN_0040f4b0's display struct actually gets constructed
+    each frame/call - would let every offset there be mapped directly back to a Runtime Object
+    offset instead of via string-format inference.
+
+PRIORITY 6 (if time remains): What event does FUN_0040b510's cycle actually represent? (20 min)
+[ ] We know it fires a generic "%d %s%s %s!\n" notification via FUN_004182e0 when a
+    power-to-weight floor is cleared, for 5 subsystem slots. The specific noun/verb isn't known -
+    trace FUN_00401490 and FUN_00401560 (called just before the notify in FUN_004182e0) to see
+    if they set global "current message" state that would reveal the actual flavor text
+    (malfunction? random activation? something else entirely?).
 
 ==================================================================================
 AFTER THIS SESSION
 ==================================================================================
 
 Update re_analysis/ENERGY_SYSTEM_MAP.md with whatever is resolved (don't create a parallel
-doc - that's exactly the fragmentation Path B4 had to clean up). Update
-energy_system_analysis.py's KNOWN_CONSTANTS dict if new constants are decoded. Write a new
-NEXT_SESSION_PROMPT.txt for whatever comes after (Path B6 - likely combat damage formulas
-and the personality/AI struct, per docs/handoff-PATH-B2-energy-analysis.md's still-open
-goals #3 and #4, since the energy-system goal is now done).
+doc). Update energy_system_analysis.py's KNOWN_CONSTANTS dict if new constants are decoded.
+Write a new NEXT_SESSION_PROMPT.txt for whatever comes after. If Priorities 1-4 all close out
+this session, the energy-system investigation is essentially complete and the NEXT prompt
+should pivot to Path B7 - combat damage formulas and the personality/AI struct, per
+docs/handoff-PATH-B2-energy-analysis.md's still-open goals #3 and #4.
 
 ==================================================================================
 REMEMBER THE PEDAGOGICAL GOALS (from CLAUDE.md)

@@ -51,6 +51,7 @@ address you can see in Ghidra, this is the first thing to check.**
 **Functions:**
 - `analyze_pe_header(binary_path)` - Read PE header to get image base and section info
 - `va_to_file_offset(va, binary_path)` - Convert Ghidra Virtual Address to file offset (uses `GHIDRA_IMAGE_BASE`, not the PE header's image_base — see fix above)
+- `file_offset_to_va(file_offset, binary_path)` - **New in Path B5.** Inverse of `va_to_file_offset()` — turns a raw file offset (e.g. a hit from `binary_tools.find_value_in_binary()`) back into a Ghidra-normalized VA. Needed when hand-verifying whether a string/constant is really referenced by code Ghidra hasn't analyzed — see the Path B5 workflow note below.
 - `read_constant_at_address(binary_path, va, size=8)` - Read raw bytes at virtual address
 - `interpret_as_double(data)` - Parse 8 bytes as IEEE 754 double
 - `interpret_as_float(data)` - Parse 4 bytes as IEEE 754 float
@@ -78,9 +79,20 @@ hits = find_double_in_binary('/path/to/Begin.exe', 4.0, section_filter='.rdata')
 
 **When to Use:**
 - Verifying any of the constants in `KNOWN_CONSTANTS` against the binary
-- Converting Ghidra addresses to file offsets for reading binary data
+- Converting Ghidra addresses to file offsets for reading binary data (and back, with `file_offset_to_va`)
 - Parsing floating-point constants from the binary
 - Cross-checking whether a suspected constant appears anywhere Ghidra's xref list missed
+- **Path B5 workflow:** when Ghidra's `get_xrefs_to` returns nothing for a string/constant, don't
+  assume it's an indexed table — it might mean Ghidra never analyzed the referencing code as a
+  function at all (this happened for `"Charging %d bank%s!\n"` and its containing function,
+  `0x00412bb0`/`0x00408b80` — both real code, neither in Ghidra's function database). Workflow:
+  `binary_tools.find_value_in_binary(binary, target_va)` to find the raw pointer's file offset,
+  `file_offset_to_va(offset, binary)` to see where the reference itself lives, then dump raw bytes
+  around that VA with `binary_tools.dump_ship_entry()` (or a plain contiguous hex dump — see this
+  session's transcript) and hand-disassemble. Once you find a function's real start (look for a
+  repeated `sub esp, N` prologue after `cc cc` padding), check `get_function_by_address` /
+  `decompile_function_by_address` again — if Ghidra still says "no function found," it has to be
+  decoded by hand.
 
 **Corrected understanding (Path B4) — full details in `ENERGY_SYSTEM_MAP.md`:**
 There is **no single "4:1 WES:RES ratio" constant**. `0x00464688` = 100.0, a generic
@@ -124,7 +136,8 @@ git commit -m "Update PYTHON_TOOLS.md: Add new_tool.py entry"
 | B2 | Energy system | `energy_system_analysis.py` | Hypothesized a 4:1 WES:RES ratio constant (later corrected) |
 | B3 | Deep dive | — | Verified the constant, found it was 100.0 not 4.0; found real 4.0 elsewhere |
 | B4 | Energy system, complete | `energy_system_analysis.py` (bug-fixed + extended) | Fixed VA→offset bug; mapped Drive & Shield's real 4x mechanisms; corrected 3 mis-identified display fields; wrote `ENERGY_SYSTEM_MAP.md` |
-| B5+ | Future | TBD | Trace weapon (Bank/Tube/Launcher) power draw; identify `FUN_0040b510`; resolve second 4.0 at `0x00478798` |
+| B5 | Weapon power draw + `FUN_0040b510` | `energy_system_analysis.py` (added `file_offset_to_va`) | Traced Bank's real energy function (no 4.0, no ratio — closes the WES:RES question for good); identified `FUN_0040b510` as an unrelated malfunction/event system; hand-disassembled 2 functions Ghidra never analyzed |
+| B6+ | Future | TBD | Resolve second 4.0 at `0x00478798`; confirm `ship+0xec`/`ship+0xf0`; name remaining subsystem slots via RTTI class strings; Display struct construction |
 
 ---
 
@@ -151,6 +164,6 @@ Each script is a learning milestone. Keep them, improve them, learn from them.
 
 ---
 
-**Last Updated:** 2026-09-26 (Path B4)
+**Last Updated:** 2026-09-26 (Path B5)
 **Maintained By:** Claude (AI Assistant)
 **For:** Begin 4 Project

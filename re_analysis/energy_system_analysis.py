@@ -117,6 +117,36 @@ def va_to_file_offset(va: int, binary_path: str) -> Optional[int]:
     return None
 
 
+def file_offset_to_va(file_offset: int, binary_path: str) -> Optional[int]:
+    """
+    Convert a file offset back to a Virtual Address (VA), using Ghidra's normalized
+    base (GHIDRA_IMAGE_BASE). Inverse of va_to_file_offset() - see that function's
+    docstring for why we use GHIDRA_IMAGE_BASE instead of the PE header's own
+    declared image_base.
+
+    Args:
+        file_offset: Raw byte offset into the .exe file (e.g. from a binary_tools.py
+                      find_value_in_binary() hit)
+        binary_path: Path to Begin.exe
+
+    Returns:
+        Virtual address matching Ghidra's addressing, or None if the offset isn't
+        inside any section's raw data.
+    """
+    header_info = analyze_pe_header(binary_path)
+
+    for section in header_info['sections']:
+        section_start = section['ptr_to_raw']
+        section_end = section_start + section['virtual_size']
+
+        if section_start <= file_offset < section_end:
+            offset_in_section = file_offset - section_start
+            rva = section['virtual_addr'] + offset_in_section
+            return rva + GHIDRA_IMAGE_BASE
+
+    return None
+
+
 def read_constant_at_address(binary_path: str, va: int, size: int = 8) -> bytes:
     """
     Read raw bytes at a virtual address.
@@ -194,11 +224,15 @@ KNOWN_CONSTANTS: Dict[int, Dict[str, any]] = {
         'confirmed_uses': [
             'FUN_00409740 - Drive charge/drain multiplier (energy)',
             'FUN_0040b320 - Shield reinforcement power-cost weight (energy, "4x power" text)',
+            'FUN_0040b510 - subsystem-malfunction/event phase-cycle multiplier (Path B5; NOT energy - '
+            'see 0x00464bd0 note below, same function)',
             'FUN_004018b0 - quadratic formula b^2-4ac coefficient (collision detection, NOT energy)',
             'FUN_004185e0 - proximity threshold in a generic status-text picker (NOT energy)',
             'FUN_00407220 - unrelated physics/repair coefficient (NOT energy)',
         ],
-        'note': 'Two distinct energy-balance rules share this literal. See ENERGY_SYSTEM_MAP.md section 3.',
+        'note': 'Two distinct energy-balance rules share this literal, plus 3 confirmed non-energy reuses. '
+                'Path B5 confirmed weapons (Bank/FUN_004087b0) do NOT use this constant at all - see '
+                'ENERGY_SYSTEM_MAP.md section 3.3b. See section 3 for the full breakdown.',
     },
     0x00478798: {
         'value': 4.0,
@@ -212,9 +246,17 @@ KNOWN_CONSTANTS: Dict[int, Dict[str, any]] = {
         'role': 'Shared 0.5 scaling factor',
         'confirmed_uses': [
             'FUN_00409a70 - end-of-frame Drive reactor pool scaling',
-            'FUN_0040b510 - unidentified charge-cycle-shaped function',
+            'FUN_0040b510 - subsystem-malfunction/event phase-cycle multiplier (Path B5)',
         ],
-        'note': 'Purpose beyond Drive not confirmed. FUN_0040b510 subsystem unidentified.',
+        'note': "Path B5 identified FUN_0040b510: it is NOT part of the reactor energy pool system. "
+                "It's a generic phase/percent-chance cycle (same shape as Drive's charge cycle, "
+                "reusing FUN_004013e0's percent-roll helper) driven by a SEPARATE ship-wide "
+                "'power-to-weight ratio' (reactor output / dead-weight-tonnage, computed in "
+                "FUN_004035b0) rather than the per-frame reactor pool from FUN_00404250. Called for "
+                "5 subsystem slots: ship+0xb50, +0xb88 (Tractor), +0xbb8, +0xbf0, +0xc20 (Cloak). "
+                "Reports events via FUN_004182e0's generic '%d %s%s %s!\\n' notifier. Both the 4.0 "
+                "and 0.5 uses here are coincidental reuse of the same literals, structurally unrelated "
+                "to Drive/Shield's energy math. See ENERGY_SYSTEM_MAP.md section 3.4.",
     },
     0x00465088: {'value': 12.0, 'role': "Drive 'ready' charge threshold", 'confirmed_uses': ['FUN_00409740']},
     0x00465488: {
@@ -236,9 +278,20 @@ KNOWN_CONSTANTS: Dict[int, Dict[str, any]] = {
     },
     0x00464b08: {
         'value': 0.1,
-        'role': 'Minimum regen floor',
-        'confirmed_uses': ['FUN_0040aea0 - Shield per-unit charge cycle'],
-        'note': 'Value confirmed; clamps the regen delta to a minimum of 0.1 per tick.',
+        'role': 'Minimum regen floor / power-to-weight brownout threshold',
+        'confirmed_uses': [
+            'FUN_0040aea0 - Shield per-unit charge cycle (clamps regen delta to a minimum of 0.1/tick)',
+            'FUN_004035b0 - power-to-weight ratio floor: below 0.1, skip the whole malfunction-event '
+            'pass for the frame (Path B5)',
+        ],
+        'note': 'Same literal, two unrelated gating roles - Shield regen floor vs. a "brownout" cutoff.',
+    },
+    0x00465440: {
+        'value': 0.001,
+        'role': 'Small epsilon added when clamping a per-tick charge increment to its cap',
+        'confirmed_uses': ['FUN_004087b0 - Bank/Phaser-Bank per-unit charge cycle (Path B5)'],
+        'note': 'New in Path B5. Ensures the clamped per-tick charge amount is always slightly larger '
+                'than the exact cap, so the charge-progress loop provably terminates in finite ticks.',
     },
 }
 
@@ -336,10 +389,13 @@ def analyze_wes_res_ratio(binary_path: str) -> Dict[str, any]:
 
     analysis = {
         'headline': (
-            "No single WES:RES ratio exists. Two separate energy-balance rules both reuse "
-            "the same 4.0 literal (0x00464ad8): Drive charge/drain rate, and Shield "
-            "reinforcement power cost. Weapon (Bank/Tube/Launcher) power draw has not been "
-            "traced yet - open question for Path B5."
+            "No single WES:RES ratio exists, and Path B5 confirmed it never did. Two separate "
+            "energy-balance rules reuse the same 4.0 literal (0x00464ad8): Drive charge/drain "
+            "rate, and Shield reinforcement power cost. Weapons (Bank, confirmed Path B5) use "
+            "NEITHER 4.0 nor any reactor-relative ratio at all - a flat reactor-rate deduction "
+            "plus a separate type-specific per-tick charge cap. FUN_0040b510 (also using 4.0 "
+            "and 0.5) turned out to be an unrelated subsystem-malfunction/event system driven by "
+            "a ship-wide power-to-weight ratio, not the reactor pool."
         ),
         'constants': constants,
         'confirmed_mechanisms': {
@@ -354,10 +410,17 @@ def analyze_wes_res_ratio(binary_path: str) -> Dict[str, any]:
                 'array': 'ship_runtime+0x7f8, 0x48-byte records',
                 'note': 'This is the literal "Reinforced shields require 4x power" mechanism.',
             },
+            'bank_weapon_charge': {
+                'function': 'FUN_004087b0 (per-unit), FUN_00408b40 (array driver), ship+0x438',
+                'formula': 'pool -= reactorRate; then pool -= min(maxCharge/chargeRate, remaining)+0.001',
+                'note': 'Path B5. NO 4.0, no ratio of any kind - confirms WES:RES never existed for '
+                        'weapons. Harsher failure mode than Drive/Shield: if the reactor cannot cover '
+                        'even its own rate this tick, accumulated charge progress resets to zero.',
+            },
         },
         'not_using_4x': {
             'cloak': 'FUN_0040a690 - flat crew_count*per_crew_cost + base_cost formula, no 4.0',
-            'weapons': 'Not yet traced - see ENERGY_SYSTEM_MAP.md Open Questions #1',
+            'weapons': 'FUN_004087b0 (Bank) - confirmed Path B5, see bank_weapon_charge above',
         },
         'critical_addresses': {
             '0x00464688': '100.0 - generic percent-to-fraction (NOT energy-specific)',
