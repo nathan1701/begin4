@@ -942,3 +942,11 @@ into that doc), found that Begin 3 has no accumulating hull-HP pool (a genuine s
 mid-session via a live memory read — see `COMBAT_DAMAGE_MAP.md` §0), and left a full open-questions
 list of its own (`COMBAT_DAMAGE_MAP.md` §6), headlined by the Tube/torpedo equivalent of this whole
 chain being completely untraced.
+
+**Update (`TORPEDO_DAMAGE` session):** that Tube/torpedo equivalent is now traced through the launch
+moment — see the new `TORPEDO_DAMAGE_MAP.md`. Confirmed torpedoes really are separate projectile
+objects (not a Bank near-twin), and extensively live-tested the tube lock/reload/fire cycle across
+two real play sessions (one ending in the player's own ship being destroyed mid-test, which usefully
+crashed an early version of the watch script and got fixed). The projectile's own flight/collision/
+impact code — where torpedo damage actually gets applied — is still completely untraced
+(`TORPEDO_DAMAGE_MAP.md` §5 item 5), the natural next session's target.

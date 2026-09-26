@@ -27,13 +27,21 @@
 - `print_doubles(entries, header="")` - Pretty-print a `dump_doubles()` result.
 
 **Also in this directory:** `read_live_classdata.py` (new in the class-data mapping session,
-**extended in `COMBAT_DAMAGE`**) - a one-off diagnostic (not part of the general toolkit, kept for
-reference) that reads a running Begin.exe's live `class_data` struct via `/proc/<pid>/mem`, needed
-to catch and confirm the off-by-4 file-offset bug described below. `COMBAT_DAMAGE` added reads for
-`class_data+0x380/+0x390/+0x3a0` and the live ship's own `+0x110`, used to confirm Begin 3 has no
-accumulating hull-HP pool (see `COMBAT_DAMAGE_MAP.md` §0). Usage:
-`sudo python3 read_live_classdata.py <PID>` (needs root because of `ptrace_scope=1` — same-user
-access alone isn't enough to read another process's memory).
+extended in `COMBAT_DAMAGE`, **extended again in `TORPEDO_DAMAGE`**) - a one-off diagnostic (not
+part of the general toolkit, kept for reference) that reads a running Begin.exe's live `class_data`
+struct via `/proc/<pid>/mem`, needed to catch and confirm the off-by-4 file-offset bug described
+below. `COMBAT_DAMAGE` added reads for `class_data+0x380/+0x390/+0x3a0` and the live ship's own
+`+0x110`, used to confirm Begin 3 has no accumulating hull-HP pool (see `COMBAT_DAMAGE_MAP.md` §0).
+`TORPEDO_DAMAGE` added a `--watch [duration]` mode (`watch_tubes()`) that polls `ship+0x454`'s Tube
+array repeatedly under one `sudo` prompt, printing only tubes whose fields changed since the last
+poll — needed because a single before/after snapshot completely missed the transient `ready(+0x30)`
+flag, and a real live play session is long enough that repeated `sudo` prompts would otherwise be
+disruptive. Also hardened against the ship pointer going stale mid-watch (battle ending, ship
+destroyed) after this happened for real and crashed an earlier version — see
+`TORPEDO_DAMAGE_MAP.md` §2.5. Usage: `sudo python3 read_live_classdata.py <PID>` for a single
+snapshot (now including the Tube array), or `sudo python3 read_live_classdata.py <PID> --watch
+[duration_seconds]` (needs root because of `ptrace_scope=1` — same-user access alone isn't enough to
+read another process's memory).
 
 **Usage Example:**
 ```python
@@ -171,6 +179,7 @@ retroactively.
 | B7 | Reactor-rate chase unification, `ship+0xe8`/`0xec`/`0xf0` | none new (used existing `va_to_file_offset`/`file_offset_to_va`) | Found `unit+0x30`(Drive)/`+0x34`(Shield) are array-container back-pointers, not ship back-pointers — same shape as Bank/Tube's `+0x20`; unified all three into one "unit → array → fixed class-data pointer → static double" mechanism; found `ship+0xe8` is a shuffled commanding-officer-name pointer, not "crew count"; found a likely genuine construction-time bug in `FUN_00418080`; confirmed `ship+0xf0` is an int (DWT-copy) with no per-frame writer found. Full writeup: `ENERGY_SYSTEM_MAP.md` §3.6/§3.7/§7. |
 | `CLASS_DATA_MAPPING` (2026-09-26) | Full class_data TypeRecord table + off-by-4 fix | `binary_tools.py` (added `dump_doubles`/`print_doubles`), `read_live_classdata.py` (new) | Traced all 13 subsystem `ConstructArray` functions to find the complete TypeRecord offset table in `class_data` (§3.8); found and fixed a session-crossing off-by-4 bug in `ship-struct-analysis.md`'s static file offsets via a live `/proc/<pid>/mem` read of the running game, which reversed two of Path B7's headline findings (`ship+0xe8` is a ship name not a surname; `ship+0xec`'s field is a legitimate surname pointer, not a bug) and corrected `ship+0xf0`/`FUN_004035b0`'s ratio from "power-to-weight" to crew-based (§3.9). Done as a prerequisite to combat-damage work. First session named under the new descriptive-naming convention (see note above the table). |
 | `COMBAT_DAMAGE` (2026-09-26) | Phaser/Bank weapon-fire → hit → shield-absorb → hull/destruction chain, fully traced | `read_live_classdata.py` (extended, not rewritten — added reads for `class_data+0x380/+0x390/+0x3a0` and live `ship+0x110`) | Traced the entire phaser fire chain (`FUN_00403330`→`FUN_00408fa0`→`FUN_00408cf0`) including the damage formula (linear range falloff, no `4.0` despite decompiler pseudocode claiming otherwise — see `COMBAT_DAMAGE_MAP.md` §5), fully decoded shield absorption (directional facings, per-class capacity/efficiency from the TypeRecord table, a shield-bypassing "weapon type 1"), found and confirmed `Ship::vftable+0x34` = `FUN_00404d90` (damage application), and — via a live memory read — **overturned Begin 3 having any accumulating hull-HP pool**: every hull-penetrating hit is independently checked against a flat per-class destruction threshold. This closed `ENERGY_SYSTEM_MAP.md` §7 items 7 and 10 for good. Full writeup: `COMBAT_DAMAGE_MAP.md`. Torpedo/Tube path left for a future session. |
+| `TORPEDO_DAMAGE` (2026-09-26) | Torpedo/Tube fire chain traced through launch (projectile allocation); full live-tested lock/reload/fire model | `read_live_classdata.py` (extended — added `--watch` mode / `watch_tubes()`, and hardened it against the ship pointer going stale mid-watch) | Traced Tube's fire chain (`FUN_0040c0a0`→`FUN_0040beb0`→`FUN_0040bf70`) from raw disassembly, confirming torpedoes allocate a real projectile object (`FUN_0043d97e(0x118)`) rather than Bank's instant hit-scan — genuinely different mechanics, not "a near-twin of Bank" as an earlier session's power-draw note had implied. Then, via extensive live testing across two real play sessions (including one that ended in the player's ship being destroyed mid-test), fully confirmed the tube-state model: `ready(+0x30)` is a single-instant launch flag, `target(+0x6c)` is a standing lock from `"lock all tubes X"` that auto-reacquires after each ~20-28s reload cycle, and `field_34` is NOT firing-related at all (overturning a mid-session hypothesis) — a live-testing methodology parallel to `COMBAT_DAMAGE`'s `class_data+0x380` correction. Also disproved an "auto-fire" hypothesis for torpedoes via a clean zero-input control test. Full writeup: `TORPEDO_DAMAGE_MAP.md`. Projectile flight/collision/impact still completely untraced (`TORPEDO_DAMAGE_MAP.md` §5 item 5) — the natural next session. |
 
 ---
 
@@ -197,6 +206,6 @@ Each script is a learning milestone. Keep them, improve them, learn from them.
 
 ---
 
-**Last Updated:** 2026-09-26 (class-data mapping session)
+**Last Updated:** 2026-09-26 (`TORPEDO_DAMAGE` session)
 **Maintained By:** Claude (AI Assistant)
 **For:** Begin 4 Project

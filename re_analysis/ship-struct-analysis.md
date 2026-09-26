@@ -214,10 +214,13 @@ Alignment appears to be 4-byte boundaries (word-aligned on x86).
 4. **Find game loop** — 10 subcycles per cycle, resource allocation, AI decision tree
 5. ~~**Reverse combat damage model** — linear vs. squared distance falloff for different weapon
    types.~~ **Done for phasers/Bank — see `COMBAT_DAMAGE_MAP.md`.** Confirmed **linear** falloff
-   (`1 − distance/maxRange`, not squared) for the phaser/Bank weapon path specifically. **Still
-   open: the torpedo/Tube path** (`COMBAT_DAMAGE_MAP.md` §6 item 10) — torpedoes are physical
-   projectiles per the game's own flavor text (travel time, arming distance), so their falloff
-   mechanism may not match phasers' at all; don't assume it's the same formula.
+   (`1 − distance/maxRange`, not squared) for the phaser/Bank weapon path specifically. **Torpedo/Tube
+   fire chain now traced through launch (`TORPEDO_DAMAGE` session, see `TORPEDO_DAMAGE_MAP.md`)** —
+   confirmed torpedoes really are physical projectile objects (`FUN_0043d97e(0x118)` allocation),
+   genuinely different from Bank's instant hit-scan, not just a near-twin with a different range
+   formula. **Still open: everything after launch** — the projectile's own travel/arming-timer/
+   collision/impact code, where any damage falloff for torpedoes specifically would live
+   (`TORPEDO_DAMAGE_MAP.md` §5 item 5) — completely untraced.
 
 ---
 

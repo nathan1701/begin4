@@ -3,133 +3,161 @@ BEGIN 4 REVERSE ENGINEERING - NEXT SESSION PROMPT
 ==================================================================================
 
 PROJECT: Begin 4 - Reverse engineer Begin 3 energy system, implement in Begin 4
-STATUS: The energy-system investigation, the CLASS_DATA_MAPPING session, and the COMBAT_DAMAGE
-        session (phaser/Bank weapon fire, hit resolution, shield absorption, hull/destruction) are
-        all DONE. The single biggest remaining thread in the combat-damage goal is the torpedo/Tube
-        weapon path, which is completely untraced - everything COMBAT_DAMAGE found was specifically
-        about phasers/Bank. Ready to start a session on that (suggested name: `TORPEDO_DAMAGE` or
-        similar - see PYTHON_TOOLS.md's "Related Sessions & Paths" table for the naming convention).
-LAST ACHIEVEMENT: COMBAT_DAMAGE session (2026-09-26) - traced the entire phaser/Bank weapon-fire
-                  chain from the per-frame "should we fire" check down through per-target hit
-                  resolution, decoded the damage formula (linear range falloff, confirmed via raw
-                  disassembly after Ghidra's decompiler pseudocode gave a wrong answer - see below),
-                  fully decoded shield absorption (6 directional facings, per-class capacity/
-                  efficiency pulled from the class_data TypeRecord table, a shield-bypassing
-                  "weapon type 1"), found Ship::vftable+0x34 = the real damage-application function,
-                  and - via a live memory read - overturned a mid-session hypothesis that Begin 3
-                  has an accumulating hull-HP pool. It doesn't: every hull-penetrating hit is
-                  independently checked against a flat per-class destruction threshold. This closed
-                  ENERGY_SYSTEM_MAP.md's two longest-open questions (§7 items 7 and 10) for good.
-                  Full writeup in the new re_analysis/COMBAT_DAMAGE_MAP.md.
+STATUS: The energy-system investigation, CLASS_DATA_MAPPING, COMBAT_DAMAGE (phaser/Bank), and
+        TORPEDO_DAMAGE (torpedo/Tube fire chain through launch) sessions are all DONE. The single
+        biggest remaining thread in the combat-damage goal is the torpedo PROJECTILE's own
+        behavior after launch - travel, arming timer, collision detection, and the actual
+        damage-on-impact call - which is completely untraced. Ready to start a session on that
+        (suggested name: `TORPEDO_IMPACT` or similar).
+LAST ACHIEVEMENT: TORPEDO_DAMAGE session (2026-09-26) - traced the torpedo/Tube fire chain
+                  (`FUN_0040c0a0`->`FUN_0040beb0`->`FUN_0040bf70`) from raw disassembly, confirming
+                  torpedoes allocate a real ~280-byte projectile object (`FUN_0043d97e(0x118)`)
+                  rather than Bank's instant hit-scan - genuinely different mechanics, overturning
+                  an earlier session's "near-twin of Bank" assumption (that was specifically about
+                  power draw). Then, via extensive live `/proc/<pid>/mem` testing across two real
+                  play sessions (PYTHON_TOOLS.md's `read_live_classdata.py` gained a `--watch` mode
+                  for this), fully confirmed the tube-state model: `ready(+0x30)` is a genuine
+                  single-instant launch flag (caught it flip 5 separate times), `target(+0x6c)` is
+                  a standing lock from "lock all tubes X" that auto-reacquires ~20-28s after each
+                  reload with no re-issued command needed, and `field_34` is NOT firing-related at
+                  all (a mid-session hypothesis this was a "queued fire order" was overturned by
+                  138+ seconds of it never changing across 8+ real fires). Also directly disproved
+                  an "auto-fire" hypothesis for torpedoes with a clean zero-input control test -
+                  unlike Bank/phasers, torpedo tube state only ever changes in response to a
+                  processed command (this is confirmed as a turn-based game, not continuous
+                  real-time). One test session ended with the player's own ship being destroyed
+                  mid-watch, which crashed an early version of the watch script (a short
+                  /proc/<pid>/mem read) - now fixed to detect and report this instead of crashing.
+                  Full writeup in the new re_analysis/TORPEDO_DAMAGE_MAP.md.
 
 ==================================================================================
 READ THIS FIRST
 ==================================================================================
 
-1. re_analysis/COMBAT_DAMAGE_MAP.md - the authority on weapon firing, damage formulas, shield
-   absorption, and hull/destruction mechanics. Read §0 first (a correction made mid-session, still
-   worth knowing about) and §6 for the full open-questions list - item 10 (torpedo/Tube path) is
-   the natural next session's target, but items 1-9 are all smaller, independently pickable
-   loose ends from the phaser/Bank work if the torpedo path stalls or isn't wanted next.
-2. re_analysis/ENERGY_SYSTEM_MAP.md - still the authority on the energy system AND class_data
-   structure. §7 items 7 and 10 are now marked CLOSED with pointers into COMBAT_DAMAGE_MAP.md - if
-   you're cross-referencing older claims about `ship+0xf0`, `ship+0x110`, or `class_data+0x380`/
-   `+0x390`/`+0x3a0`, trust COMBAT_DAMAGE_MAP.md's versions, not anything older. §8 also picked up
-   two new methodology lessons from this session worth reading before doing more Ghidra work (the
-   "FPU-hidden-argument decompiler trap" one is a real time-saver - it bit this session three times).
-3. re_analysis/ship-struct-analysis.md - its TODO list item 9 now covers the resolved
-   `class_data+0x380/+0x390/+0x3a0` fields; item 5 in "NEXT STEPS IN RE" is marked done for
-   phasers specifically, with the torpedo path flagged as the part that's still open.
-4. re_analysis/PYTHON_TOOLS.md - tool manifest. `read_live_classdata.py` was extended (not
-   rewritten) this session to also read `class_data+0x380/+0x390/+0x3a0` and a live ship's
-   `+0x110` - reuse that rather than writing a new one-off script if another live check is needed.
-5. docs/handoff-PATH-B2-energy-analysis.md - goal #3 (combat damage formulas) is now substantially
-   done for phasers; goal #4 (personality/AI struct) is still open for later.
+1. re_analysis/TORPEDO_DAMAGE_MAP.md - the authority on torpedo/Tube fire chain and the live-tested
+   lock/reload/fire behavior. Read §0 first (two overturned assumptions - torpedoes aren't a Bank
+   near-twin, and there's no auto-fire) and §5 for the full open-questions list - item 5 (the
+   projectile's own post-launch behavior) is the natural next session's target.
+2. re_analysis/COMBAT_DAMAGE_MAP.md - the authority on phaser/Bank weapon firing, damage formulas,
+   shield absorption, and hull/destruction mechanics - still fully valid, and TORPEDO_DAMAGE_MAP.md
+   §3 draws a direct comparison table against it worth reading if cross-referencing the two weapon
+   types.
+3. re_analysis/ENERGY_SYSTEM_MAP.md - still the authority on the energy system AND class_data
+   structure. Picked up a short pointer at the end of §7 (right after the COMBAT_DAMAGE update) to
+   TORPEDO_DAMAGE_MAP.md this session - nothing else in this doc changed.
+4. re_analysis/ship-struct-analysis.md - "NEXT STEPS IN RE" item 5 updated to reflect the torpedo
+   fire chain now being traced through launch, with the projectile's post-launch behavior flagged
+   as the part that's still open.
+5. re_analysis/PYTHON_TOOLS.md - tool manifest. `read_live_classdata.py` gained a `--watch
+   [duration]` CLI mode (`watch_tubes()`) this session - polls the Tube array repeatedly under one
+   sudo prompt instead of needing a fresh snapshot (and fresh password) per read, and now tolerates
+   the ship pointer going stale mid-watch instead of crashing. Reuse this for any further live
+   torpedo (or other subsystem) testing rather than writing a new one-off script.
+6. docs/handoff-PATH-B2-energy-analysis.md - goal #3 (combat damage formulas) is now substantially
+   done for both phasers and torpedo launch; goal #4 (personality/AI struct) is still open for
+   later.
 
 Do NOT trust re_analysis/PATH_B3_FINDINGS.md, B3_PROGRESS.txt, or PATH-B-FINDINGS.md's claims about
 ship+0xb88/+0xbb8/+0xc20/+0xe8/+0xec/+0xf0, class_data+0x14/+0x18, or any ship-class file offset -
-ENERGY_SYSTEM_MAP.md, ship-struct-analysis.md, and now COMBAT_DAMAGE_MAP.md are the corrected
-authorities as of 2026-09-26.
+ENERGY_SYSTEM_MAP.md, ship-struct-analysis.md, COMBAT_DAMAGE_MAP.md, and now TORPEDO_DAMAGE_MAP.md
+are the corrected authorities as of 2026-09-26.
 
 ==================================================================================
-LIVE GAME ACCESS (good news for the torpedo session specifically)
+LIVE GAME ACCESS AND METHODOLOGY (carries forward, proved its worth again this session)
 ==================================================================================
 
-The developer is keeping the **same running instance** of Begin.exe under Wine up for the next few
-sessions, so the PID found at the end of COMBAT_DAMAGE is expected to still be valid - **PID 117796**
-(`Z:\home\nathan\Downloads\Begin301b151\Begin.exe`) - worth confirming with a quick
-`ps aux | grep -i begin.exe` at the start of the session rather than assuming it's unchanged forever
-(it won't survive a game restart or reboot), but this saves re-deriving it every time.
+The developer plays the actual game interactively and can load/aim/fire torpedoes, fly evasive
+maneuvers, and generally produce real ground truth on request - this was used constantly and
+successfully this session (not just as a last resort) and directly overturned two separate
+mid-session hypotheses (an "auto-fire" theory and a "field_34 is a fire order" theory) that static
+analysis alone had gotten wrong or left ambiguous. Keep using it early and often, especially for:
 
-More importantly for torpedo work specifically: **the developer can interactively load, aim, and
-fire a torpedo in the live game** on request. This is a real analysis tool, not just a value-check -
-it means a live memory read (via `read_live_classdata.py` or a quick extension of it, same
-`/proc/<pid>/mem` + sudo technique) can be timed around an actual player action, e.g. "read
-`ship+0x454`'s Tube array right before and right after you fire one torpedo" to directly observe
-whatever field represents an in-flight torpedo, an armed/unarmed state, or a target lock - exactly
-the kind of dynamic behavior that's hard to infer from static disassembly alone when a whole new
-weapon path (with likely projectile/travel-time semantics, per COMBAT_DAMAGE_MAP.md §6 item 10) is
-being traced from scratch. Use this early and often for the torpedo path rather than treating it as
-a last resort the way the class-data live check was used last session.
+- The torpedo projectile's post-launch behavior (next session's main topic) - the developer can
+  fire a torpedo and then either let it fly to impact or maneuver to dodge it, both of which are
+  exactly the kind of dynamic behavior static disassembly struggles to infer from scratch.
+- `read_live_classdata.py --watch [duration_seconds]` is the tool to reach for - it polls
+  repeatedly under one sudo prompt and only prints changed fields, which is what made catching the
+  single-instant `ready(+0x30)` flag possible this session (a single before/after snapshot missed
+  it completely). Extend `_snapshot_tubes()`/`watch_tubes()` rather than writing a new watcher -
+  they're already structured to add more addresses/fields to poll if the projectile object's own
+  address becomes known (e.g. by reading a "most recent torpedo" pointer, or scanning a suspected
+  in-flight-projectiles list once found).
+- The PID changes every time the game restarts (was 117796, then 124275 after the player's ship was
+  destroyed and the game was relaunched) - always confirm with `ps aux | grep -i begin.exe` rather
+  than assuming a PID from a previous session or even earlier in the same session is still valid.
+- Sudo prompts require an interactive terminal - use the terminal-panel tool (types the command into
+  a real tab the user can type their password into) rather than a sandboxed shell tool that can't
+  supply a TTY for the password prompt. Long `--watch` durations (multiple minutes) are worth
+  defaulting to since they avoid needing to re-prompt for sudo mid-experiment.
+- This is confirmed to be a turn-based game (state only advances on a processed command, including
+  a "did nothing" blank Enter) - keep this in mind when reasoning about timing; wall-clock gaps
+  between events reflect how fast the player is typing/submitting turns, not a fixed real-time
+  clock. A rejected/typo'd command can still consume a turn even though it does nothing else.
 
 ==================================================================================
 GHIDRA CONNECTION
 ==================================================================================
 
-A live Ghidra MCP connection (tools named mcp__ghidra__*) was used throughout. Confirm it's live at
-the start of the session (e.g. `get_current_function` - a "no function at this address" reply means
-it's connected and working, not broken).
+A live Ghidra MCP connection (tools named mcp__ghidra__*) was used again this session. Confirm it's
+live at the start of the session (e.g. `get_current_function` - a "no function at this address"
+reply means it's connected and working, not broken).
 
-**This session's biggest lesson, and a real time-sink if you don't know to watch for it:** when a
-decompiled function call has suspiciously few or opaque arguments (an `extraout_ECX`-style register,
-or a function that looks like it's "called with nothing"), the real argument is very likely arriving
-on the x87 FPU stack rather than as a normal parameter - Ghidra's high-level pseudocode can silently
-misattribute it to the wrong caller-side expression, including inventing a plausible-looking but
-WRONG constant reference. This happened three times this session, most expensively when the
-decompiled phaser-damage formula confidently claimed a `4.0` literal that turned out not to exist
-anywhere in the function's real instructions (raw disassembly showed `0.5`). When you see this
-pattern, use `disassemble_function`, not `decompile_function`, and read the `FLD`/`FST`/`FSTP`
-sequence directly. Full writeup: COMBAT_DAMAGE_MAP.md §5.
-
-The other standing lesson (from the class-data mapping session, still relevant): a heuristic
-file-offset table can be systematically wrong by a constant amount and still "confirm" several
-fields by coincidence. When a code-confirmed offset disagrees with a heuristic/file-offset-based
-one, trust the code-confirmed one, and if static analysis can't settle which is real, a live memory
-read can - see ENERGY_SYSTEM_MAP.md §3.9 and this session's own live check (COMBAT_DAMAGE_MAP.md
-§0) for two examples of exactly how and when to reach for that tool.
+The FPU-hidden-argument decompiler trap from COMBAT_DAMAGE_MAP.md §5 is still the standing lesson
+for any new disassembly work - watch for decompiled calls with suspiciously few/opaque arguments
+right after floating-point operations, and fall back to `disassemble_function` over
+`decompile_function` when it shows up. It did NOT come up this session (the torpedo launch function,
+FUN_0040bf70, decompiled cleanly), but TORPEDO_DAMAGE_MAP.md §5 item 3 flags that its trajectory math
+(FUN_00401460/FUN_00405630/FUN_00401c10) hasn't been hand-verified against raw disassembly yet, and
+given how that bit COMBAT_DAMAGE_MAP.md's phaser formula, don't assume it's safe just because nothing
+looked obviously wrong at a glance.
 
 ==================================================================================
-NEXT SESSION: TORPEDO / TUBE WEAPON PATH (suggested name, pick your own if focus shifts)
+NEXT SESSION: TORPEDO PROJECTILE POST-LAUNCH BEHAVIOR (suggested name, pick your own if focus shifts)
 ==================================================================================
 
-Everything COMBAT_DAMAGE_MAP.md documents comes from the phaser/Bank weapon path specifically
-(`ship+0x438`, `FUN_00403330`→`FUN_00408fa0`→`FUN_00408cf0`). The torpedo/Tube path
-(`ship+0x454`) is completely untraced by comparison. Do not assume it mirrors Bank's mechanism -
-the manual's own flavor text (already-known strings like "The torpedo arms after %.0lf cycle%s
-then remains stable...", "travels at a velocity of...") strongly implies torpedoes are actual
-physical projectiles with travel time and an arming distance, unlike phasers' apparent
-instant-hit-scan-across-the-whole-ship-list approach. The existing note in PYTHON_TOOLS.md that
-"Tube's per-unit charge code is a near-exact structural twin of Bank's" was specifically about
-*power draw* (Path B6), not hit resolution - don't let that carry over as an assumption here.
+TORPEDO_DAMAGE_MAP.md traced the fire chain down to the exact moment `FUN_0040bf70` allocates a new
+~280-byte projectile object (`FUN_0043d97e(0x118)`) via `FUN_00405830`, seeds it with a
+target/trajectory snapshot, and returns. Nothing about what happens to that object afterward - its
+travel, its "arms after N cycles" timer (manual flavor text, already known), collision detection
+against ships, or the actual damage-on-impact call - has been traced yet. This is a structurally
+different kind of hunt than either weapon session so far: instead of one self-contained per-ship
+fire function, expect to be looking for wherever the game keeps a list of "things in flight" and
+updates them once per turn, independent of any specific ship's own per-turn handler.
 
 Useful running starts:
-- `ship+0x454` is Tube's confirmed runtime array offset (ENERGY_SYSTEM_MAP.md §2.1/§3.8).
-- Look for the per-frame "should we fire torpedoes" check the same way COMBAT_DAMAGE_MAP.md §1
-  found Bank's (`FUN_00403330` was found via `get_xrefs_to` on the "%s firing %d phaser%s.\n"
-  string's handler function, `FUN_004183e0` - the torpedo equivalent almost certainly exists
-  near "%s firing %d torpedo%s!\n" (already known string, VA 0x004691c0, from this session's
-  `list_strings` pass - xrefs to it weren't checked yet).
-- If torpedoes really are projectile objects (not instant hit-scan), expect a *separate* object
-  type/allocator (look for something like `FUN_0043d97e`-style small-object allocation, already
-  seen a few times this session for various event objects) and a collision-detection pass
-  elsewhere in the per-frame loop, rather than one self-contained fire function like Bank's
-  `FUN_00408cf0`.
-- Weapon type `1` (COMBAT_DAMAGE_MAP.md §2.2) - the shield-bypassing type found in shield-absorption
-  code - is an open guess for "this might be torpedoes." Worth checking directly once the torpedo
-  fire function is found: does it pass weaponType=1 to `Ship::vftable+0x34` (`FUN_00404d90`)?
+- The projectile object's constructor is `FUN_00405830` (`TORPEDO_DAMAGE_MAP.md` §1.3/§4) - check
+  its other callers (`get_function_xrefs`), and check what vtable (if any) the object gets
+  constructed with, the same way `Ship::vftable+0x34` was found by reading the ship vtable directly
+  in COMBAT_DAMAGE.
+- The manual's own already-known strings ("The torpedo arms after %.0lf cycle%s then remains
+  stable...", "travels at a velocity of...") are a ready-made source of xrefs to whatever code
+  handles the arming/travel timer - `get_xrefs_to` on those two string addresses (already listed in
+  ENERGY_SYSTEM_MAP.md's game-strings pass) hasn't been checked yet.
+- Torpedo damage is still known to copy a charge value into the projectile at
+  `torpedo+0xf0` (TORPEDO_DAMAGE_MAP.md §1.3/§4) - if a damage-application call is found, check
+  whether it goes through the already-known `Ship::vftable+0x34` (`FUN_00404d90`,
+  COMBAT_DAMAGE_MAP.md §4) the same way Bank's does, and whether it passes weaponType=1 (the
+  shield-bypass type from COMBAT_DAMAGE_MAP.md §2.2 - still an open guess that this is torpedoes).
+- Live testing angle worth trying early: fire a torpedo, then use `read_live_classdata.py --watch`
+  (extended to poll whatever address turns out to hold the projectile, once found statically) to
+  watch its own fields change turn-by-turn as it travels - the same technique that successfully
+  caught the tube's `ready` flag this session should work just as well on the projectile's own
+  arming/travel state, and the developer can deliberately dodge or hold course to produce both a
+  hit and a miss on request.
 
-STILL OPEN, LOWER PRIORITY (raise again if torpedo work naturally touches them, or as standalone
-quick wins - see COMBAT_DAMAGE_MAP.md §6 for full descriptions of items 1-9):
+STILL OPEN, LOWER PRIORITY (raise again if this session naturally touches them, or as standalone
+quick wins - see TORPEDO_DAMAGE_MAP.md §5 for items 1-4/6-8, and COMBAT_DAMAGE_MAP.md §6 for its own
+still-open items 1-9):
+- `FUN_0040bf10` (torpedo launch's pre-launch prep call) - not decoded.
+- `field_34`'s real role (TORPEDO_DAMAGE_MAP.md §5 item 2) - confirmed not firing-related, but what
+  it is remains open. Suggested test: load two different torpedo classes into different tubes and
+  see if it differs between them.
+- The same-target dedup/salvo-merge pass (TORPEDO_DAMAGE_MAP.md §1.1/§5 item 4) - never observed
+  live; needs a test with two+ tubes firing at the same locked target in the same turn.
+- Multi-target split-locking ("lock tubes 1-3 on ship A, 4-6 on ship B") - never tested live, needs
+  a scenario with two enemy ships present simultaneously.
+- Homing-vs-dumb-fire distinction (Romulan Plasma tracks continuously per the developer's own
+  gameplay knowledge; other classes apparently don't) - where this is encoded is unknown.
 - `FUN_004086a0` (Bank fire-selection logic) - which banks are chosen to fire each frame, and why.
 - `ship+0x138` - a second casualty-style pool that loses a random amount on critical hits.
 - `ship+0xc70`'s linked list - damage propagates here on big hits; distinct from the known
@@ -154,8 +182,9 @@ REMEMBER THE PEDAGOGICAL GOALS (from CLAUDE.md)
 2. One step at a time - check in with the user before moving to the next major finding
 3. Check for understanding
 4. Reuse and improve existing Python scripts rather than rewriting them
-5. The user can run the actual game and report what they see/test, INCLUDING live memory reads
-   (used again this session, exactly as prescribed - a live `/proc/<pid>/mem` read settled whether
-   `class_data+0x380` reading `0` was a bug or the real value; it was the real value) - use this
-   actively, not just for bug-hunting paths but whenever static analysis produces a result worth
-   double-checking.
+5. The user can run the actual game and report what they see/test, INCLUDING live memory reads -
+   this session leaned on this harder than any before it, using long `--watch` sessions during real
+   play (not just quick before/after snapshots) to catch transient state and directly test/overturn
+   two separate hypotheses in real time. Keep reaching for this actively, not as a last resort -
+   it's now clearly the single most effective tool this project has for resolving ambiguity that
+   static analysis alone leaves open.
