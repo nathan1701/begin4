@@ -244,5 +244,30 @@ This explains why energy calculations iterate through these arrays - each subsys
 
 ---
 
-Generated: 2026-09-25  
-Status: **Active tracing in progress**
+## Addendum (Path B4, 2026-09-26): Runtime subsystem offsets confirmed
+
+The runtime object layout above held up well under further tracing. Path B4 independently
+confirmed several of these subsystem offsets by finding the actual per-frame update code
+(`FUN_00404250`) and matching it against notification strings and behavior:
+
+- **`0x150` (Reactor)** and **`0x708` (Warp/Drive)** — confirmed as listed here
+- **`0x7f8` (Shields)** — confirmed; this is where the real "Reinforced shields require 4x
+  power" mechanism lives (see `re_analysis/ENERGY_SYSTEM_MAP.md` §3.2)
+- **`0xc20` (Cloak)** — confirmed via `"We have uncloaked due to lack of power.\n"`
+- **`0xb88`/`~0xbb8` (Tractor Beam)** — confirmed via `"Our tractor beam has failed due to lack
+  of power.\n"`
+
+One important correction: **the ship struct read by `FUN_0040f4b0` (the status-display
+function) is NOT this runtime object.** It's a separate, flattened summary struct built fresh
+for display, with a completely different field layout. Don't assume an offset found via
+`FUN_0040f4b0` applies to the `0xc80`-byte runtime object mapped here, or vice versa — see
+`ENERGY_SYSTEM_MAP.md` §1 for the full three-structure breakdown (Class Data / Runtime Object /
+Display struct).
+
+Full energy-system writeup, including the two confirmed "4x" mechanisms and the corrected
+constant map: **[`re_analysis/ENERGY_SYSTEM_MAP.md`](re_analysis/ENERGY_SYSTEM_MAP.md)**.
+
+---
+
+Generated: 2026-09-25
+Status: **Active tracing in progress** (energy system: complete as of Path B4, 2026-09-26 — see addendum above)

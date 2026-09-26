@@ -94,6 +94,8 @@ With the struct now fully mapped, the next steps are:
 
 1. **Find code that reads ship stats** — Use Ghidra xrefs to locate functions accessing the ship table
 2. **Trace energy allocation** — Find the code that implements WES→RES conversion and power distribution
+   *(Done, Path B4: see `ENERGY_SYSTEM_MAP.md` — turned out to be two separate subsystem-specific
+   4x rules rather than one WES→RES conversion; weapon energy draw is still untraced)*
 3. **Reverse combat damage** — Locate phaser (linear) vs. torpedo (squared) damage calculations
 4. **Personality/AI struct** — Search for bravery, loyalty, aggression values
 5. **Game loop** — Find the 10-subcycle-per-cycle main loop

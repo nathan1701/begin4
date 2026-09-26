@@ -1,3 +1,8 @@
+> **✅ COMPLETE as of Path B4 (2026-09-26).** Every checklist item below was eventually resolved
+> (some with different answers than expected — there is no single 4:1 constant). Kept as the
+> historical planning doc. **See [`ENERGY_SYSTEM_MAP.md`](ENERGY_SYSTEM_MAP.md) for the final,
+> corrected results**, and `B3_PROGRESS.txt` for the phase-by-phase completion record.
+
 # Path B3: Energy System Implementation & Verification
 
 ## 🎯 Mission Summary

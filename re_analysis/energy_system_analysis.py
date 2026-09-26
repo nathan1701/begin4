@@ -73,6 +73,16 @@ def analyze_pe_header(binary_path: str) -> Dict[str, any]:
         }
 
 
+GHIDRA_IMAGE_BASE = 0x00400000
+# Ghidra normalizes this binary's load address to 0x00400000 regardless of what
+# the PE header's own OptionalHeader.ImageBase field says (that field is an oddball
+# 0x00062e00 for this executable). All VAs copied from Ghidra assume the 0x00400000
+# base, so conversions MUST use this constant, not header_info['image_base'].
+# Using the PE header's image_base here silently produces wrong (but plausible-looking)
+# file offsets for addresses outside .text, which is why 0x00465088 etc. previously
+# raised "not found in any PE section" even though they're valid .rdata addresses.
+
+
 def va_to_file_offset(va: int, binary_path: str) -> Optional[int]:
     """
     Convert a Virtual Address (VA) in memory to a file offset in the binary.
@@ -86,10 +96,10 @@ def va_to_file_offset(va: int, binary_path: str) -> Optional[int]:
         File offset for seeking in the binary, or None if VA is not in any section
     """
     header_info = analyze_pe_header(binary_path)
-    image_base = header_info['image_base']
 
-    # Convert VA to RVA (Relative Virtual Address)
-    rva = va - image_base
+    # Convert VA to RVA (Relative Virtual Address) using Ghidra's normalized base,
+    # NOT header_info['image_base'] (see GHIDRA_IMAGE_BASE note above).
+    rva = va - GHIDRA_IMAGE_BASE
 
     # Find which section contains this RVA
     for section in header_info['sections']:
@@ -153,80 +163,213 @@ def interpret_as_int32(data: bytes) -> int:
     return struct.unpack('<i', data)[0]
 
 
-def search_energy_constants(binary_path: str) -> Dict[str, any]:
-    """
-    Search for known energy system constants in the binary.
+# --- Path B4 findings (2026-09-26) ---------------------------------------------------------
+# Full writeup: ENERGY_SYSTEM_MAP.md. Short version: there is NO single "4:1 WES:RES ratio"
+# constant. 0x00464688 (100.0) is a generic percent-to-fraction helper used everywhere in the
+# codebase; the real 4.0 literal (0x00464ad8) is reused by the compiler for two DIFFERENT real
+# game-balance rules (Drive charge/drain rate, and reinforced-vs-regular Shield power cost) plus
+# several unrelated formulas (a collision quadratic, a UI threshold, a physics coefficient).
+# KNOWN_CONSTANTS below replaces the old single-constant model.
 
-    Known constants:
-    - 0x00464688: Energy multiplier constant (appears 3+ times in FMUL instructions)
-                   Used in weapon/reactor energy calculations
-                   Likely value: 4.0 (for 4:1 WES:RES ratio)
+KNOWN_CONSTANTS: Dict[int, Dict[str, any]] = {
+    0x00464688: {
+        'value': 100.0,
+        'role': 'Generic percent(0-100) -> fraction(0.0-1.0) conversion',
+        'confirmed_uses': [
+            'FUN_0040f4b0 - all 3 display FMULs (percent formatting only)',
+            'FUN_00409740 - Drive charge cycle',
+            'FUN_004013e0 - generic rand()-based percent-chance helper',
+            'FUN_0040aea0 - Shield per-unit charge cycle',
+        ],
+        'note': '35+ xrefs total. NOT energy-specific despite Path B2/B3 assuming otherwise.',
+    },
+    0x00464680: {
+        'value': 1.0 / 32768.0,
+        'role': 'rand() normalizer (RAND_MAX=32767 assumption)',
+        'confirmed_uses': ['FUN_004013e0 - rand()/32768.0 < percent/100.0'],
+    },
+    0x00464ad8: {
+        'value': 4.0,
+        'role': 'The real "4x" literal - reused for multiple unrelated purposes',
+        'confirmed_uses': [
+            'FUN_00409740 - Drive charge/drain multiplier (energy)',
+            'FUN_0040b320 - Shield reinforcement power-cost weight (energy, "4x power" text)',
+            'FUN_004018b0 - quadratic formula b^2-4ac coefficient (collision detection, NOT energy)',
+            'FUN_004185e0 - proximity threshold in a generic status-text picker (NOT energy)',
+            'FUN_00407220 - unrelated physics/repair coefficient (NOT energy)',
+        ],
+        'note': 'Two distinct energy-balance rules share this literal. See ENERGY_SYSTEM_MAP.md section 3.',
+    },
+    0x00478798: {
+        'value': 4.0,
+        'role': 'Second, separate 4.0 literal in .data',
+        'confirmed_uses': [],
+        'note': 'UNRESOLVED - zero direct-addressing xrefs found. Likely reached via indexed/array '
+                'addressing, not a literal FMUL [addr]. Open question for Path B5.',
+    },
+    0x00464bd0: {
+        'value': 0.5,
+        'role': 'Shared 0.5 scaling factor',
+        'confirmed_uses': [
+            'FUN_00409a70 - end-of-frame Drive reactor pool scaling',
+            'FUN_0040b510 - unidentified charge-cycle-shaped function',
+        ],
+        'note': 'Purpose beyond Drive not confirmed. FUN_0040b510 subsystem unidentified.',
+    },
+    0x00465088: {'value': 12.0, 'role': "Drive 'ready' charge threshold", 'confirmed_uses': ['FUN_00409740']},
+    0x00465488: {
+        'value': 40.0,
+        'role': "Drive 'fire' charge threshold",
+        'confirmed_uses': ['FUN_00409740', 'FUN_004185e0 (reused as a baseline distance)'],
+    },
+    0x00464ad0: {
+        'value': 1e-08,
+        'role': 'Min distance-squared cutoff (collision detection)',
+        'confirmed_uses': ['FUN_004018b0'],
+        'note': 'Value confirmed; not energy-related (geometry epsilon).',
+    },
+    0x00464ac8: {
+        'value': 1.0,
+        'role': 'Coefficient in FUN_00407220 (unrelated physics/repair formula)',
+        'confirmed_uses': ['FUN_00407220'],
+        'note': 'Value confirmed; functional meaning within that formula still open.',
+    },
+    0x00464b08: {
+        'value': 0.1,
+        'role': 'Minimum regen floor',
+        'confirmed_uses': ['FUN_0040aea0 - Shield per-unit charge cycle'],
+        'note': 'Value confirmed; clamps the regen delta to a minimum of 0.1 per tick.',
+    },
+}
+
+
+def find_double_in_binary(binary_path: str, target: float, tolerance: float = 1e-9,
+                           section_filter: Optional[str] = None) -> List[Dict[str, any]]:
+    """
+    Scan the whole binary for 8-byte-aligned IEEE 754 doubles matching `target`.
+
+    Complements binary_tools.find_value_in_binary (which searches for 32-bit ints).
+    Useful for locating literals like the constants in KNOWN_CONSTANTS, or checking
+    whether a suspected ratio appears anywhere else un-cross-referenced (e.g. inside
+    an array Ghidra can't see as a scalar reference).
+
+    Args:
+        binary_path: Path to Begin.exe
+        target: The double value to search for (e.g. 4.0)
+        tolerance: Absolute tolerance for the match
+        section_filter: If given (e.g. '.rdata'), only report hits in that PE section
 
     Returns:
-        Dictionary mapping address -> analyzed value
+        List of {'va': int, 'file_offset': int, 'section': str} for each match
+    """
+    header_info = analyze_pe_header(binary_path)
+    matches = []
+
+    with open(binary_path, 'rb') as f:
+        data = f.read()
+
+    for offset in range(0, len(data) - 8, 8):
+        chunk = data[offset:offset + 8]
+        try:
+            value = struct.unpack('<d', chunk)[0]
+        except struct.error:
+            continue
+        if abs(value - target) > tolerance:
+            continue
+
+        # Map file offset back to a VA + section name for reporting
+        section_name = None
+        va = None
+        for section in header_info['sections']:
+            if section['ptr_to_raw'] <= offset < section['ptr_to_raw'] + section['size_of_raw']:
+                section_name = section['name']
+                va = GHIDRA_IMAGE_BASE + section['virtual_addr'] + (offset - section['ptr_to_raw'])
+                break
+
+        if section_filter and section_name != section_filter:
+            continue
+
+        matches.append({'va': va, 'file_offset': offset, 'section': section_name})
+
+    return matches
+
+
+def search_energy_constants(binary_path: str) -> Dict[int, Dict[str, any]]:
+    """
+    Read and verify every constant in KNOWN_CONSTANTS against the live binary.
+
+    Superseded the old single-address (0x00464688) version once Path B4 established
+    there isn't one energy constant, there are several with different roles.
+
+    Returns:
+        Dictionary mapping VA -> {expected, actual, matches, role, confirmed_uses, note}
     """
     results = {}
 
-    # Known critical address for energy system
-    energy_constant_va = 0x00464688
-
-    try:
-        raw_bytes = read_constant_at_address(binary_path, energy_constant_va, size=8)
-
-        if len(raw_bytes) == 8:
-            as_double = interpret_as_double(raw_bytes)
-            as_float = interpret_as_float(raw_bytes[:4])
-
-            results[energy_constant_va] = {
-                'raw_hex': raw_bytes.hex(),
-                'as_double': as_double,
-                'as_float': as_float,
-                'description': 'Energy system multiplier (WES:RES ratio)',
-                'usage': 'Referenced in disassembly at 0x0040f871, 0x0040f997, 0x0040fc87'
-            }
-    except Exception as e:
-        results[energy_constant_va] = {'error': str(e)}
+    for va, info in KNOWN_CONSTANTS.items():
+        entry = dict(info)
+        try:
+            raw_bytes = read_constant_at_address(binary_path, va, size=8)
+            actual = interpret_as_double(raw_bytes)
+            entry['actual_value'] = actual
+            entry['raw_hex'] = raw_bytes.hex()
+            expected = info.get('value')
+            entry['matches_expected'] = (expected is None) or abs(actual - expected) < 1e-9
+        except Exception as e:
+            entry['error'] = str(e)
+        results[va] = entry
 
     return results
 
 
 def analyze_wes_res_ratio(binary_path: str) -> Dict[str, any]:
     """
-    Analyze the WES (Weapon Energy Storage) to RES (Reactor Energy Storage) ratio.
-
-    NOTE: Ghidra uses 0x00400000 as the base address, NOT the PE image_base.
-    This function assumes 0x00400000 as the Ghidra load address.
+    Full energy-system report. Despite the name (kept for backward compatibility with
+    earlier sessions' scripts/notes), there is no single WES:RES ratio - see
+    ENERGY_SYSTEM_MAP.md for the full corrected picture. This returns the two confirmed
+    "4x" mechanisms plus the full constant catalogue.
 
     Returns:
         Dictionary with analysis results
     """
     constants = search_energy_constants(binary_path)
 
-    # Find actual 4.0 constants in the binary
-    actual_4_0_addresses = {
-        '0x00464ad8': 'First 4.0 constant found in .rdata',
-        '0x00478798': 'Second 4.0 constant found in .data'
-    }
-
     analysis = {
-        'wes_res_ratio': '4:1',
-        'description': 'Weapon Energy Storage to Reactor Energy Storage ratio',
+        'headline': (
+            "No single WES:RES ratio exists. Two separate energy-balance rules both reuse "
+            "the same 4.0 literal (0x00464ad8): Drive charge/drain rate, and Shield "
+            "reinforcement power cost. Weapon (Bank/Tube/Launcher) power draw has not been "
+            "traced yet - open question for Path B5."
+        ),
         'constants': constants,
-        'interpretation': {
-            'wes_multiplier': 4.0,
-            'res_multiplier': 1.0,
-            'meaning': 'Weapons/shields receive 4x the energy multiplier compared to reactor base output'
+        'confirmed_mechanisms': {
+            'drive_charge_drain': {
+                'function': 'FUN_00409740',
+                'formula': 'delta = (ratio_in - (100-phase)/100.0 * reactor_rate) * 4.0',
+                'array': 'ship_runtime+0x708, 0x38-byte records',
+            },
+            'shield_reinforcement_cost': {
+                'function': 'FUN_0040b320',
+                'formula': 'total_draw += unit.value * (unit.type == 10 ? 4.0 : 1.0)',
+                'array': 'ship_runtime+0x7f8, 0x48-byte records',
+                'note': 'This is the literal "Reinforced shields require 4x power" mechanism.',
+            },
+        },
+        'not_using_4x': {
+            'cloak': 'FUN_0040a690 - flat crew_count*per_crew_cost + base_cost formula, no 4.0',
+            'weapons': 'Not yet traced - see ENERGY_SYSTEM_MAP.md Open Questions #1',
         },
         'critical_addresses': {
-            '0x00464688': 'Address referenced in FMUL instructions (contains 100.0, not 4.0)',
-            '0x00464ad8': 'Actual 4.0 constant location (first instance)',
-            '0x00478798': 'Actual 4.0 constant location (second instance)',
-            '0x0040f871': 'First FMUL instruction using constant',
-            '0x0040f997': 'Second FMUL instruction using constant',
-            '0x0040fc87': 'Third FMUL instruction using constant',
-            '0x0040f4b0': 'Main display function (ship status, weaponry, power)'
+            '0x00464688': '100.0 - generic percent-to-fraction (NOT energy-specific)',
+            '0x00464ad8': 'The real 4.0 - reused for Drive AND Shield (different rules)',
+            '0x00478798': 'Second 4.0 - unresolved, no direct xrefs found',
+            '0x0040f871': 'Display FMUL #1 - Shield charge percentage (not "unknown field")',
+            '0x0040f997': 'Display FMUL #2 - Drive charge percentage (not "reactor power")',
+            '0x0040fc87': 'Display FMUL #3 - likely Cloak charge percentage (not "shield capacity")',
+            '0x0040f4b0': 'Ship status display function (contains all 3 FMULs)',
+            '0x00404250': 'Ship per-frame subsystem update (the real UpdatePower driver)',
         },
-        'note': 'Path B3 investigation: The addresses in NEXT_SESSION_PROMPT may be slightly off. Need to verify actual constant usage.'
+        'see_also': 'ENERGY_SYSTEM_MAP.md for full structure maps, function tables, and open questions.',
     }
 
     return analysis
@@ -242,6 +385,10 @@ if __name__ == "__main__":
 
         try:
             analysis = analyze_wes_res_ratio(binary_path)
+            # Constants are keyed by int VA internally; render as hex for readability.
+            analysis['constants'] = {
+                f'0x{va:08x}': info for va, info in analysis['constants'].items()
+            }
             print(json.dumps(analysis, indent=2, default=str))
         except Exception as e:
             print(f"Error: {e}")

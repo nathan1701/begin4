@@ -1,3 +1,9 @@
+> **⚠️ SUPERSEDED (Path B4, 2026-09-26).** This document's field guesses for the three FMUL
+> operands (0x208, 0x1c8, 0x390) were all wrong, and its central premise (a single 4:1 WES:RES
+> ratio at 0x00464688) does not hold. Kept here as the historical record of how the
+> investigation unfolded. **See [`ENERGY_SYSTEM_MAP.md`](ENERGY_SYSTEM_MAP.md) for the corrected,
+> current picture.**
+
 # Path B3 Findings - Energy System Investigation
 
 ## Summary

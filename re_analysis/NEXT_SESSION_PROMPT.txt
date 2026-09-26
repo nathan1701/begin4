@@ -1,261 +1,146 @@
 ==================================================================================
-BEGIN 4 REVERSE ENGINEERING - PATH B4 NEXT SESSION PROMPT
+BEGIN 4 REVERSE ENGINEERING - PATH B5 NEXT SESSION PROMPT
 ==================================================================================
 
 PROJECT: Begin 4 - Reverse engineer Begin 3 energy system, implement in Begin 4
-CURRENT PHASE: Path B4 - Ship Structure Mapping & Energy Flow Analysis
-LAST ACHIEVEMENT: Path B3 - Verified FMUL instructions, discovered constant mismatch
+CURRENT PHASE: Path B5 - Weapon Energy & Remaining Open Questions
+LAST ACHIEVEMENT: Path B4 - Energy system fully mapped for Drive, Shield, and Cloak;
+                   corrected all of Path B3's field mis-identifications; wrote
+                   ENERGY_SYSTEM_MAP.md as the canonical reference.
 
 ==================================================================================
-CRITICAL CONTEXT - PATH B3 FINDINGS (UPDATED)
+READ THIS FIRST
 ==================================================================================
 
-**IMPORTANT DISCOVERY - The Constant Mismatch:**
-Path B2 reported that address 0x00464688 contains the 4.0 WES:RES ratio constant.
-However, binary analysis reveals:
+Before anything else, read:
+1. re_analysis/ENERGY_SYSTEM_MAP.md - the complete, corrected picture. Contains the full
+   structure maps, both confirmed "4x" mechanisms, the constant catalogue, and section 7
+   ("Open questions for Path B5"), which this file expands into concrete tasks.
+2. re_analysis/PYTHON_TOOLS.md - tool manifest, including a bug fix to
+   energy_system_analysis.py you should know about before using it (VA-to-file-offset
+   was using the wrong image base; now fixed).
 
-  - Address 0x00464688 actually contains: 100.0 (not 4.0!)
-  - Actual 4.0 constants are located at:
-    * 0x00464ad8 (in .rdata section, file offset 0x00063cd8)
-    * 0x00478798 (in .data section, file offset 0x00077998)
-
-**The Three FMUL Instructions (All use 100.0 at 0x00464688):**
-1. 0x0040f871 - FMUL double ptr [0x00464688]  Loads: [EAX + 0x208]
-   Purpose: Multiplies unknown ship field by 100.0 for display
-
-2. 0x0040f997 - FMUL double ptr [0x00464688]  Loads: [ECX + 0x1c8]
-   Purpose: Multiplies reactor power level by 100.0 for display
-
-3. 0x0040fc87 - FMUL double ptr [0x00464688]  Loads: [ECX + 0x390]
-   Purpose: Multiplies shield capacity by 100.0 for display
-
-All three are inside FUN_0040f4b0, the main ship status display function.
-
-**Key Ship Structure Offsets Discovered:**
-- 0x208: Unknown field (first FMUL operand)
-- 0x1c0: Reactor output/power (used in calculations)
-- 0x1c8: Reactor power level (second FMUL operand)
-- 0x1d0: Shield type
-- 0x38: Divisor in power calculations
-- 0x390: Shield capacity (third FMUL operand)
-- 0x58, 0x90: Weapon counts (different types)
-- 0x200, 0x110, 0x158: Different reactor types
-- 0x2d0: Unknown (possibly armor/defense)
-
-**Related game text:**
-"Reinforced shields require 4x power" (0x004662f0) - confirms 4:1 WES:RES ratio
-is intentional game balance design. (Note: This text references 4x, but the FMUL
-instructions use 100.0. Need to understand relationship.)
+Do NOT re-trust re_analysis/PATH_B3_FINDINGS.md or B3_PROGRESS.txt for factual claims about
+the energy system - both are marked superseded and kept only as historical record of how
+the investigation unfolded (useful for the "how we got here" story, not for facts).
 
 ==================================================================================
-AVAILABLE RESOURCES & FILES
+CRITICAL CONTEXT - WHAT PATH B4 ESTABLISHED
 ==================================================================================
 
-PYTHON TOOLS (in /home/nathan/claude/begin4/re_analysis/):
+There is NO single "4:1 WES:RES ratio" constant. Two separate, real energy-balance rules
+both happen to reuse the same 4.0 literal (0x00464ad8):
 
-1. binary_tools.py - General binary analysis utilities
-   Functions:
-   - dump_ship_entry(binary_path, file_offset, size=256) - Extract ship struct data
-   - print_dump(entries, header="") - Pretty-print binary data
-   - compare_ship_entries(binary_path, ships) - Compare multiple entries
-   - find_value_in_binary(binary_path, value, show_context=True) - Search for values
+1. DRIVE charges and drains at reactor_rate x 4.0 (FUN_00409740, ship+0x708 array,
+   0x38-byte records)
+2. SHIELD reinforcement costs 4x the power of a regular shield (FUN_0040b320, ship+0x7f8
+   array, 0x48-byte records) - this is the literal "Reinforced shields require 4x power"
+   mechanism from the manual/game text
 
-2. energy_system_analysis.py - NEW! Energy-specific analysis tools
-   Functions:
-   - analyze_pe_header(binary_path) - Read PE header info
-   - va_to_file_offset(va, binary_path) - Convert Ghidra VA to file offset
-   - read_constant_at_address(binary_path, va, size=8) - Read raw bytes at VA
-   - interpret_as_double(data) - Parse IEEE 754 double
-   - interpret_as_float(data) - Parse IEEE 754 float
-   - interpret_as_int32(data) - Parse 32-bit int
-   - search_energy_constants(binary_path) - Find WES:RES constant
-   - analyze_wes_res_ratio(binary_path) - Full energy analysis
+CLOAK (FUN_0040a690, ship+0xc20) uses neither pattern - flat crew-count-based cost, no 4.0.
 
-GHIDRA PROJECT:
-- Location: /home/nathan/claude/begin4/re_analysis/begin4-ghidra/begin3_project.gpr
-- Binary analyzed: /home/nathan/claude/begin4/original_game/Begin.exe
+WEAPONS (Phaser Banks / Torpedo Tubes / Probe Launchers) have not been traced at all.
+This is the single biggest gap - the manual's "WES" (Weapon Energy Storage) side of the
+ratio has never actually been examined in code. Priority 1 below.
 
-DOCUMENTATION:
-- /home/nathan/claude/begin4/re_analysis/PATH_B3_FINDINGS.md - Path B3 complete analysis
-- /home/nathan/claude/begin4/re_analysis/B3_PROGRESS.txt - Phase-by-phase progress tracking
-- /home/nathan/claude/begin4/CLAUDE.md - Project overview & learning directives
-
-PYTHON TOOLS IMPROVEMENTS (Path B3):
-- energy_system_analysis.py now properly parses PE section headers
-- VA-to-file-offset conversion now uses section table (not naive image_base math)
-- Correctly handles Ghidra's 0x00400000 base address vs PE header's 0x00062e00
-- Can find all floating-point constants in binary by exhaustive search
+The generic constant 0x00464688 = 100.0 is NOT energy-related. It's a percent-to-fraction
+helper used in 35+ unrelated functions across the whole codebase. Don't chase it further -
+it's a solved, closed question (see ENERGY_SYSTEM_MAP.md section 4).
 
 ==================================================================================
-PATH B4 IMMEDIATE TASKS (PRIORITY ORDER) - CONTINUATION OF PATH B3
+GHIDRA CONNECTION
 ==================================================================================
 
-STATUS: Phases 1-2 COMPLETE (verified constants & traced FMUL instructions)
-REMAINING: Phases 3-4 (map data structure & document findings)
+A live Ghidra MCP connection (tools named mcp__ghidra__*) is available and was the key tool
+in Path B4 - direct decompile/disassemble/xref queries, not manual byte-searching. Confirm
+it's connected at the start of the session (e.g. mcp__ghidra__get_current_function or a
+get_xrefs_to call on a known address). If it's not available, the Python tools
+(binary_tools.py, energy_system_analysis.py) still work for static analysis but xref-based
+tracing (which is how most of Path B4's findings were made) won't be possible.
 
-PHASE 3: MAP COMPLETE DATA STRUCTURE (Priority 1 - 60 min)
-[ ] 1. Answer the 100.0 mystery:
-  [ ] Why do FMUL instructions use 100.0 instead of 4.0?
-  [ ] Is 100.0 a display zoom factor?
-  [ ] Is it shield max capacity?
-  [ ] Search for all references to address 0x00464688 in disassembly
-
-[ ] 2. Locate the actual 4.0 usage:
-  [ ] Search for references to 0x00464ad8 in Ghidra (first 4.0 location)
-  [ ] Search for references to 0x00478798 in Ghidra (second 4.0 location)
-  [ ] Are these used in ship initialization? Energy calculations? Lookup tables?
-  [ ] Understand the context of surrounding values (π/180, trigonometric constants)
-
-[ ] 3. In FUN_0040f4b0, map all ship structure offsets:
-  [ ] 0x208: What field is this? Trace where it comes from
-  [ ] 0x1c8: Confirm this is reactor power level
-  [ ] 0x390: Confirm this is shield capacity
-  [ ] 0x1c0, 0x38, 0x20: Map all power-related fields
-  [ ] 0x58, 0x90, 0x200, 0x110, 0x158: Confirm weapon/reactor counts
-
-[ ] 4. Find the display strings and trace backwards:
-  [ ] "WEAPONRY:" at 0x00466508 - what code path displays it?
-  [ ] "Reactors" at 0x00466550 - what code path displays it?
-  [ ] These strings should lead to weapon and reactor display code
-  [ ] Document the relationship between string display and data fields
-
-PHASE 4: CREATE COMPREHENSIVE DOCUMENTATION (Priority 2 - 45 min)
-[ ] 5. Create ENERGY_SYSTEM_MAP.md documenting:
-  - Complete ship structure layout with ALL offsets
-  - The 100.0 constant and what it represents
-  - The 4.0 constants and where they're actually used
-  - Energy calculation flow: reactor output → processing → weapon/shield allocation
-  - All formulas discovered in the code
-  - Resolved: "Which constant affects weapon vs shield power allocation?"
-
-[ ] 6. Update energy_system_analysis.py with findings:
-  [ ] Add function to search for all references to a constant address
-  [ ] Add ship structure definition/comments
-  [ ] Create summary report of energy system architecture
+Useful Ghidra tools from this session: decompile_function_by_address, disassemble_function,
+get_xrefs_to, get_function_by_address, list_strings (with a `filter` argument - very useful
+for finding a subsystem's format strings, e.g. filter="Phaser" or filter="Bank").
 
 ==================================================================================
-HOW TO USE THE PYTHON TOOLS
+PATH B5 TASKS (PRIORITY ORDER)
 ==================================================================================
 
-Example 1: Verify the constant
-  python3 energy_system_analysis.py /home/nathan/claude/begin4/original_game/Begin.exe
+PRIORITY 1: Trace actual weapon power draw (60 min)
+[ ] Find the Bank/Tube/Launcher equivalent of Shield's FUN_0040b4a0 / FUN_0040b320 pair,
+    or Cloak's FUN_0040a690.
+[ ] Starting points:
+    - list_strings filter="Charging" -> "Charging %d bank%s!\n" (0x467b64) - trace backwards
+      from its xref to find the function that actually applies a charge/energy cost when
+      firing a bank
+    - list_strings filter="BANK STATUS" (0x004674d4) - the bank status screen, likely reads
+      the same per-bank energy fields a power-draw function would use
+    - FUN_00404250 (the per-frame subsystem update driver) does NOT appear to call a
+      Bank/Tube/Launcher update in the same pattern as Drive/Shield/Cloak - re-check its
+      full disassembly (not just the decompiled C, which may hide indirect/vtable calls)
+      for a call you haven't decompiled yet, or check if weapon energy is deducted at
+      fire-time only (event-driven) rather than per-frame (continuous, like Drive/Shield/Cloak)
+[ ] Once found: does it use 0x00464ad8 (4.0) at all? A different constant? No ratio at all
+    (i.e. weapons just draw a fixed cost per shot with no reactor-relative scaling)?
+[ ] This directly answers whether "WES:RES 4:1" ever existed as a real unified mechanic, or
+    was always a mis-generalization from the Shield-specific "4x power" text.
 
-Example 2: Search for a specific value (e.g., weapon capacity)
-  python3 -c "
-  from binary_tools import find_value_in_binary
-  find_value_in_binary('/home/nathan/claude/begin4/original_game/Begin.exe', 100)
-  "
+PRIORITY 2: Identify FUN_0040b510 (30 min)
+[ ] Structurally shaped like a charge-cycle function (phase counter, accumulator, uses BOTH
+    the 4.0 and 0.5 constants - the same pairing Drive uses).
+[ ] Called from three places, none decompiled yet: FUN_00409530, FUN_0040a630, FUN_0040b740
+    (FUN_0040b740 is a thin wrapper already decompiled in this session's transcript - see
+    ENERGY_SYSTEM_MAP.md function table - but its OWN caller hasn't been traced)
+[ ] Decompile all three callers and look for a notify-string (like Drive's "Drive" literal)
+    or a recognizable ship-offset match against PATH-B-FINDINGS.md's runtime object table
+    (candidates: Tractor Beam at ~0xb88, or one of the unnamed slots at 0x2a0/0x438/0x454/
+    0x470/0x9c0/0xc00/0xbf0)
 
-Example 3: Dump ship entry at a known offset
-  python3 -c "
-  from binary_tools import dump_ship_entry, print_dump
-  entries = dump_ship_entry('/home/nathan/claude/begin4/original_game/Begin.exe', 0x12345)
-  print_dump(entries, 'Ship struct at 0x12345')
-  "
+PRIORITY 3: Resolve the second 4.0 literal at 0x00478798 (30 min)
+[ ] get_xrefs_to found ZERO direct hits on this address - meaning it's not referenced by a
+    literal `FMUL double ptr [0x00478798]` anywhere. It's likely part of an array accessed
+    via a computed/indexed address (base + index*8), which Ghidra can't resolve to a fixed
+    xref automatically.
+[ ] Approach: find_double_in_binary() in energy_system_analysis.py can locate every 4.0 in
+    the binary - use section_filter='.data' and look at what's immediately before/after
+    0x00478798 in that scan to see if it's part of a recognizable table (PATH_B3_FINDINGS.md
+    already noted neighboring values 1.325817659497261 and 1.3276424705982208 - do those
+    numbers mean anything? Check if they match any per-ship-class stat from
+    ship-struct-analysis.md or all-ships-from-manual.md)
+[ ] Alternative: search for LEA/array-indexing instructions near functions that already use
+    the OTHER 4.0 (0x00464ad8) - the two may be part of the same logical table split across
+    sections by the compiler/linker, or may be genuinely unrelated
 
-==================================================================================
-GHIDRA NAVIGATION QUICK REFERENCE
-==================================================================================
+PRIORITY 4: Confirm ship+0xec's identity (20 min)
+[ ] FUN_00418080 constructs it (per PATH-B-FINDINGS.md). Several charge functions this
+    session chased a pointer near this offset (+0xe8 from a subsystem's own back-pointer)
+    to reach a reactor-rate double at +0x38 in whatever it points to.
+[ ] Decompile FUN_00418080 directly to see what it initializes and how large it is - this
+    should settle whether 0xec is the Reactor subsystem itself (despite PATH-B-FINDINGS.md
+    assigning Reactor to 0x150) or a separate "power distribution" link object.
 
-Function: FUN_0040f4b0 (Ship Status Display)
-  - Address bar: 0x0040f4b0 [ENTER]
-  - This is the main display function showing weapons, reactors, power
-
-Critical FMUL Instructions:
-  - 0x0040f871: FMUL double ptr [0x00464688]
-  - 0x0040f997: FMUL double ptr [0x00464688]
-  - 0x0040fc87: FMUL double ptr [0x00464688]
-
-Related Strings (for tracing backwards):
-  - "WEAPONRY:" at 0x00466508
-  - "Reactors" at 0x00466550
-  - "Reinforced shields require 4x power" at 0x004662f0
-
-==================================================================================
-KEY QUESTIONS - ANSWERED vs OUTSTANDING
-==================================================================================
-
-ANSWERED IN PATH B3:
-✅ What is the exact value at 0x00464688? - 100.0 (display zoom factor)
-✅ Where are the FMUL instructions? - 0x0040f871, 0x0040f997, 0x0040fc87 (all use 100.0)
-✅ What fields are being multiplied? - Ship struct offsets 0x208, 0x1c8, 0x390
-
-OUTSTANDING - PATH B4:
-1. Why is 100.0 used instead of 4.0? What does 100.0 represent?
-2. Where are the actual 4.0 constants (0x00464ad8, 0x00478798) used?
-3. How does the 4:1 WES:RES ratio factor into power allocation?
-4. Complete ship structure mapping - what is at each offset?
-5. What is the complete energy calculation flow?
-6. How is weapon/reactor capacity initialized?
-7. Are there other energy-related constants beyond 4.0 and 100.0?
-
-==================================================================================
-SUCCESS CRITERIA FOR PATH B3 (COMPLETED) + PATH B4 (IN PROGRESS)
-==================================================================================
-
-PATH B3 COMPLETION (Phases 1-2):
-✅ "0x00464688 contains 100.0 (display scaling), not 4.0"
-✅ "Actual 4.0 constants at 0x00464ad8 and 0x00478798"
-✅ "Three FMUL instructions multiply reactor/shield power by 100.0 for display"
-✅ "Ship structure offsets: 0x208, 0x1c8 (reactor), 0x390 (shield)"
-
-PATH B4 COMPLETION TARGET (Phases 3-4):
-[ ] "Complete ship structure mapping: offset 0xXX = [field name] at each critical address"
-[ ] "0x00464688 contains 100.0 because: [explanation of display scaling]"
-[ ] "The actual 4.0 WES:RES ratio is stored at 0x00464ad8/0x00478798 and used for: [purpose]"
-[ ] "The energy system works like this: [one clear paragraph with formulas and constant usage]"
-[ ] ENERGY_SYSTEM_MAP.md complete with architecture diagram
+PRIORITY 5 (if time remains): Reconcile the Display struct's construction (30 min)
+[ ] Find where FUN_0040f4b0's display struct (ENERGY_SYSTEM_MAP.md section 2.2) actually
+    gets built each frame/call - it's clearly a flattened snapshot, not the raw runtime
+    object. Finding its constructor would let every one of its offsets be mapped directly
+    back to a Runtime Object offset, removing the need for string-based inference.
 
 ==================================================================================
-LESSONS LEARNED FROM PATH B3 + TIPS FOR PATH B4
+AFTER THIS SESSION
 ==================================================================================
 
-METHODOLOGY INSIGHTS:
-1. Address discrepancies must be verified with binary analysis - don't trust initial reports
-2. Use Python tools for exhaustive constant searches (more reliable than Ghidra search)
-3. Ghidra address space (0x00400000) differs from PE header image_base
-4. PE section headers are crucial for accurate VA-to-file-offset conversion
-5. Disassembly context (before/after instructions) is essential for understanding purpose
-
-FOR PATH B4:
-1. Look for XREFS (cross-references) in Ghidra to find where constants are actually used
-2. Search for the 4.0 constants using Ghidra's search/find-in-disassembly features
-3. The 100.0 constant likely appears in display/formatting code, not game logic
-4. Look at surrounding instructions for ADDRESS CALCULATION (add/imul/lea) that might modify base
-5. Ship structure fields might be populated in initialization code (look for assembly patterns)
-6. String references ("WEAPONRY:", "Reactors") are good starting points for tracing logic
+Update re_analysis/ENERGY_SYSTEM_MAP.md with whatever is resolved (don't create a parallel
+doc - that's exactly the fragmentation Path B4 had to clean up). Update
+energy_system_analysis.py's KNOWN_CONSTANTS dict if new constants are decoded. Write a new
+NEXT_SESSION_PROMPT.txt for whatever comes after (Path B6 - likely combat damage formulas
+and the personality/AI struct, per docs/handoff-PATH-B2-energy-analysis.md's still-open
+goals #3 and #4, since the energy-system goal is now done).
 
 ==================================================================================
-PATH B3 COMPLETION SUMMARY
+REMEMBER THE PEDAGOGICAL GOALS (from CLAUDE.md)
 ==================================================================================
 
-Phases 1-2 completed successfully:
-✅ Verified the constant (found 100.0, not 4.0)
-✅ Located actual 4.0 constants at two addresses
-✅ Traced all three FMUL instructions
-✅ Identified ship structure offsets being used
-✅ Fixed Python tools for proper PE section handling
-
-Key Discovery: There's a mismatch between what Path B2 reported (4.0 at 0x00464688)
-and what actually exists in the binary (100.0 at that address, 4.0 elsewhere).
-
-This discovery is important because it suggests:
-- Display scaling (100.0) is separate from game logic (4.0)
-- The energy system might be more complex than initially thought
-- The 4.0 WES:RES ratio hasn't been located in active code yet
-
-==================================================================================
-READY FOR PATH B4
-==================================================================================
-
-Start by reading:
-1. /home/nathan/claude/begin4/re_analysis/PATH_B3_FINDINGS.md - Full technical analysis
-2. /home/nathan/claude/begin4/re_analysis/B3_PROGRESS.txt - Phase breakdown
-
-Then start Path B4 Phase 3: Understanding the 100.0 constant and locating actual 4.0 usage.
-
-Key tools available:
-- energy_system_analysis.py (enhanced with proper section handling)
-- binary_tools.py (for binary pattern searching)
-- Ghidra disassembler (for code analysis)
-- Ghidra XREFS (to find all references to a constant)
+1. Explain the WHY, not just the what
+2. One step at a time - check in with the user before moving to the next major finding
+3. Check for understanding
+4. Reuse and improve existing Python scripts rather than rewriting them

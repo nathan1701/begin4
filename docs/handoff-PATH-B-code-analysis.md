@@ -1,3 +1,8 @@
+> **Outcome note (added Path B4, 2026-09-26):** The "4:1 WES:RES ratio" goal mentioned below is
+> now resolved — see `re_analysis/ENERGY_SYSTEM_MAP.md`. Short version: no single hardcoded
+> ratio exists; the code has two separate subsystem-specific 4x rules (Drive, Shield), and
+> weapon energy draw (the actual "WES" side) is still untraced.
+
 # Path B Handoff: Code Analysis Phase
 ## Reverse Engineer Begin.exe Game Logic
 

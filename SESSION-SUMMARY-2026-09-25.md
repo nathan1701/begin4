@@ -123,8 +123,9 @@ FUN_0040d330 (main cycle)
 1. ✅ Where crew count is read (offset 0x14 in class data)
 2. ✅ Where reactor count is read (offset 0x58 in class data, but verify)
 3. ✅ Where weapon counts are read (offsets TBD)
-4. ⏳ The 4:1 WES:RES ratio constant
-5. ⏳ Energy allocation priority order (weapons → life support → shields)
+4. ✅ The 4:1 WES:RES ratio question — resolved Path B4 (2026-09-26): no single constant;
+   see `re_analysis/ENERGY_SYSTEM_MAP.md`
+5. ⏳ Energy allocation priority order (weapons → life support → shields) — weapons still untraced
 
 ### Medium Priority:
 1. Damage formulas (linear vs. squared)

@@ -148,5 +148,9 @@ Alignment appears to be 4-byte boundaries (word-aligned on x86).
 ## RELATED DOCUMENTATION
 
 - [Manual Findings](begin-manual-findings.md) — Original game mechanics, formulas, and tables
-- [Ghidra Notes](ghidra-notes.md) — Symbol names, function locations, xref chains
+- [Energy System Map](ENERGY_SYSTEM_MAP.md) — Symbol names, function locations, and xref chains
+  for the energy system specifically (this replaces a planned but never-written "Ghidra Notes"
+  doc — as of Path B4 there's no single general symbol-notes file; findings live in the
+  topic-specific docs like this one and `ENERGY_SYSTEM_MAP.md`)
+- [`PATH-B-FINDINGS.md`](../PATH-B-FINDINGS.md) — Runtime ship object layout, game loop structure
 

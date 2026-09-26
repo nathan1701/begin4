@@ -1,3 +1,11 @@
+> **Outcome note (added Path B4, 2026-09-26):** The "4:1 WES:RES ratio" framing this handoff was
+> built around turned out not to exist as a single mechanism — the address Path B2 first landed
+> on (`0x00464688`) held an unrelated generic constant (100.0), and the real `4.0` literal is
+> independently reused by two different subsystems (Drive, Shield), not one weapon/reactor
+> exchange rate. The energy-system goal this handoff set up **is now complete** — see
+> `re_analysis/ENERGY_SYSTEM_MAP.md` for the corrected results. Combat-damage and AI/personality
+> goals from this handoff (§3, §4) are still open.
+
 # Path B2 Handoff: Energy System & Combat Analysis
 
 **Status:** Ready to analyze game mechanics  

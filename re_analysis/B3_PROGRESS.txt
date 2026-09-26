@@ -3,7 +3,9 @@ PATH B3 PROGRESS SUMMARY
 ================================================================================
 
 SESSION: Path B3 Energy System Deep Dive & Verification
-STATUS: Phase 1-2 Complete, Phase 3-4 In Progress
+STATUS: ALL PHASES COMPLETE (Path B3 phases 1-2, Path B4 phases 3-4, 2026-09-26)
+See ENERGY_SYSTEM_MAP.md for the final corrected results and NEXT_SESSION_PROMPT.txt
+(Path B5) for what's still open (weapon power draw, FUN_0040b510, second 4.0 literal).
 
 ================================================================================
 PHASE 1: VERIFY THE CONSTANT ✅ COMPLETE
@@ -50,78 +52,69 @@ Findings:
   - Purpose: Shield display calculation
 
 ================================================================================
-PHASE 3: MAP DATA STRUCTURE 🔄 IN PROGRESS
+PHASE 3: MAP DATA STRUCTURE ✅ COMPLETE (Path B4, 2026-09-26)
 ================================================================================
 
-Tasks:
-[ ] Locate weapon count/capacity field in ship struct
-[ ] Locate reactor output field
-[ ] Locate shield capacity field
-[ ] Find "Reactor" string reference and trace backwards
-[ ] Find "Weaponry" string reference and trace backwards
+All guessed offsets below were WRONG — corrected by walking FUN_0040f4b0 in full and matching
+each section against its actual printed format string (not just isolated FMUL snippets).
+Full corrected map: ENERGY_SYSTEM_MAP.md section 2.2.
 
-Known Ship Structure Offsets:
-- 0x208: Unknown (first FMUL operand)
-- 0x1c0: Reactor output/power (likely)
-- 0x1c8: Reactor power level (likely, used in FMUL)
-- 0x1d0: Shield type
-- 0x38: Likely divisor in power calculations
-- 0x58: Weapon type 1 count
-- 0x90: Weapon type 2 count
-- 0x200, 0x110, 0x158: Different reactor types
-- 0x2d0: Unknown type (possibly armor/defense)
-- 0x390: Shield capacity (likely, used in FMUL)
+Corrections:
+- 0x208 was NOT "unknown" -> it's the SHIELD charge/regen percentage (FMUL #1)
+- 0x1c8 was NOT "reactor power level" -> it's the DRIVE charge percentage (FMUL #2)
+- 0x390 was NOT "shield capacity" -> it's likely CLOAK's charge percentage (FMUL #3)
+- 0x58 / 0x90 were NOT weapon counts -> they're REACTOR type 1/2 counts
+- 0x200 / 0x110 / 0x158 were NOT reactor types -> 0xc8/0x110/0x158 are the real WEAPON
+  counts (Phaser Bank / Torpedo Tube / Probe Launcher), confirmed via their exact format
+  strings ("%d Phaser bank%s...", "%d Torpedo tube%s...", "%d Probe launcher%s...")
 
-================================================================================
-PHASE 4: DOCUMENT FINDINGS 🔄 IN PROGRESS
-================================================================================
+Also discovered: this struct (fed to the display function) is NOT the same struct as the
+0xc80-byte runtime ship object from PATH-B-FINDINGS.md, despite both being "the ship" —
+a distinct, flattened summary/display struct with its own field order. See
+ENERGY_SYSTEM_MAP.md section 1.
 
-Partially complete:
-- PATH_B3_FINDINGS.md created with detailed analysis
-- Energy system hypotheses documented
-- Outstanding questions identified
-
-Still needed:
-- Complete ship structure map
-- Energy calculation flow diagram
-- Relationship between 4.0 and 100.0 constants explained
+[x] Locate weapon count/capacity field in ship struct — 0xc8 (Bank), 0x110 (Tube), 0x158 (Launcher)
+[x] Locate reactor output field — 0x58, 0x90 (counts), 0x88, 0xc0 (values)
+[x] Locate shield capacity field — 0x200 (capacity/count), 0x208 (charge %)
+[x] Find "Reactor" string reference and trace backwards — done, see above
+[x] Find "Weaponry" string reference and trace backwards — done, see above
 
 ================================================================================
-CRITICAL INSIGHTS
+PHASE 4: DOCUMENT FINDINGS ✅ COMPLETE (Path B4, 2026-09-26)
 ================================================================================
 
-1. CONSTANT MISMATCH:
+- ENERGY_SYSTEM_MAP.md created — supersedes this file and PATH_B3_FINDINGS.md for all
+  energy-system content. Contains: full structure maps, the two confirmed real "4x"
+  mechanisms (Drive charge/drain, Shield reinforcement cost), the full constant catalogue,
+  a confirmed function map, and open questions for Path B5.
+- Relationship between 4.0 and 100.0 explained: they are NOT related. 100.0 is a generic,
+  codebase-wide percent-to-fraction constant; 4.0 is the real balance literal, independently
+  reused for two different subsystems' rules.
+- energy_system_analysis.py bug-fixed (VA->file-offset was using the wrong image base) and
+  extended with a full KNOWN_CONSTANTS catalogue — see PYTHON_TOOLS.md.
+
+================================================================================
+CRITICAL INSIGHTS (final, Path B4) — see ENERGY_SYSTEM_MAP.md for full detail
+================================================================================
+
+1. CONSTANT MISMATCH (Path B3, still true):
    - Path B2 reported 4.0 at 0x00464688
    - Actual value at that address: 100.0
    - Actual 4.0 values at: 0x00464ad8 and 0x00478798
-   
-2. 100.0 SIGNIFICANCE:
-   - Used for display scaling in all three FMUL instructions
-   - Might be shield maximum capacity
-   - Might be a display zoom factor
-   
-3. 4.0 CONSTANTS:
-   - Part of lookup tables or constants arrays
-   - Surrounded by physics-related values (π/180, trigonometric values)
-   - Represents WES:RES ratio (as suspected)
+
+2. 100.0 RESOLVED (Path B4):
+   - It's a generic percent(0-100) -> fraction(0.0-1.0) helper, used in 35+ functions
+     codebase-wide (display formatting, a generic RNG percent-chance helper, Drive's and
+     Shield's own charge cycles). NOT shield capacity, NOT a zoom factor, NOT energy-specific.
+
+3. 4.0 RESOLVED (Path B4) — and it's NOT one WES:RES ratio:
+   - 0x00464ad8 is reused for TWO separate real mechanisms: Drive's charge/drain rate, and
+     Shield's reinforced-vs-regular power cost (the literal "4x power" text). Also reused
+     coincidentally by unrelated formulas (a collision quadratic, a UI threshold, a physics
+     coefficient) — narrow xref counts don't guarantee a single shared meaning.
+   - 0x00478798 (the second 4.0) remains UNRESOLVED — no direct xrefs found.
+   - Weapons (Bank/Tube/Launcher) have NOT been shown to use 4.0 at all — open for Path B5.
 
 ================================================================================
-NEXT IMMEDIATE TASKS
-================================================================================
-
-Priority 1: Understand why 0x00464688 contains 100.0
-- Is it a different energy constant?
-- Is it related to display/UI scaling?
-- Check if address is dynamically modified
-
-Priority 2: Locate the actual 4.0 usage
-- Search for references to 0x00464ad8 and 0x00478798
-- Trace where these constants are loaded from
-- Understand if they're used in energy calculations or just initialization
-
-Priority 3: Complete ship structure mapping
-- Find weapon field offsets
-- Find reactor field offsets
-- Map all relevant fields
-
+NEXT IMMEDIATE TASKS -> superseded by NEXT_SESSION_PROMPT.txt (Path B5)
 ================================================================================

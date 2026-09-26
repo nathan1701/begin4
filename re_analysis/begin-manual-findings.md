@@ -174,6 +174,11 @@ see "RE targets" below for how to use them.
    divide-by-range-squared distinction.
 7. **Energy pipeline order** — WES→RES at a 4:1 lossy conversion, then life support (`crew/10`),
    then shields, then weapon charging — a good sequence to confirm against decompiled code order.
+   *(Outcome, Path B4: no single unified WES→RES conversion function was found in code. Instead
+   there are two separate, subsystem-specific 4x rules — Drive's charge/drain rate and Shield's
+   reinforcement power cost — see `ENERGY_SYSTEM_MAP.md`. Weapon energy draw is still untraced,
+   so it remains possible the manual's "4:1" description maps onto a weapon-specific mechanism
+   not yet found — see Path B5 priority 1.)*
 8. **Cross-version diffing** — since `Begin.exe` is stated to be "a quick port to Windows of the
    DOS version," diffing decompiled routines between `BEGIN2.EXE` (DOS) and `Begin.exe` (Win32)
    may show the core simulation logic (combat/physics/AI) is nearly identical in algorithm, with
